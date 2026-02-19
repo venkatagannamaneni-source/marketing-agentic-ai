@@ -2,93 +2,130 @@
 
 ## Project Overview
 
-**marketing-agentic-ai** is an agentic AI system of 26 specialized marketing agents that collectively function as a full marketing team. It strategizes, writes, optimizes, audits, and measures marketing across the entire funnel — powered by Claude with shared product context and cross-skill orchestration.
+**marketing-agentic-ai** is a self-operating marketing team — 26 specialized AI agents organized into 5 squads, led by a Marketing Director agent, working 24/7. Agents strategize, create, optimize, measure, and iterate across the full marketing funnel. They hand off work to each other, review each other's outputs, respond to real-time data, and improve continuously — powered by Claude.
 
 ## Current State
 
-The project has **26 marketing skills installed** and is operational via Claude Code CLI. No custom application code exists yet — the system runs entirely on Claude's native skill framework.
+- **26 marketing agents installed** and operational via Claude Code CLI skills
+- **Bun + TypeScript** project scaffolded with Playwright 1.56.1
+- **Session start hook** configured for Claude Code on the web
+- **Railway MCP server** registered in `.claude/settings.json`
+- **Orchestration engine not yet built** — agents currently run one at a time via manual invocation
 
 ### Repository Contents
 
 ```
 marketing-agentic-ai/
 ├── .agents/
-│   └── skills/              # 26 marketing skill definitions (SKILL.md + references/)
-│       ├── ab-test-setup/
-│       ├── analytics-tracking/
-│       ├── cold-email/
-│       ├── competitor-alternatives/
-│       ├── content-strategy/
-│       ├── copy-editing/
-│       ├── copywriting/
-│       ├── email-sequence/
-│       ├── form-cro/
-│       ├── free-tool-strategy/
-│       ├── launch-strategy/
-│       ├── marketing-ideas/
-│       ├── marketing-psychology/
-│       ├── onboarding-cro/
-│       ├── page-cro/
-│       ├── paid-ads/
-│       ├── paywall-upgrade-cro/
-│       ├── popup-cro/
-│       ├── pricing-strategy/
-│       ├── product-marketing-context/
-│       ├── programmatic-seo/
-│       ├── referral-program/
-│       ├── schema-markup/
-│       ├── seo-audit/
-│       ├── signup-flow-cro/
-│       └── social-content/
+│   └── skills/                 # 26 agent definitions (SKILL.md + references/)
+│       ├── ab-test-setup/      # [Measure Squad]
+│       ├── analytics-tracking/ # [Measure Squad]
+│       ├── cold-email/         # [Creative Squad]
+│       ├── competitor-alt.../  # [Strategy Squad]
+│       ├── content-strategy/   # [Strategy Squad]
+│       ├── copy-editing/       # [Creative Squad]
+│       ├── copywriting/        # [Creative Squad]
+│       ├── email-sequence/     # [Activate Squad]
+│       ├── form-cro/           # [Convert Squad]
+│       ├── free-tool-strategy/ # [Convert Squad]
+│       ├── launch-strategy/    # [Strategy Squad]
+│       ├── marketing-ideas/    # [Strategy Squad]
+│       ├── marketing-psych.../  # [Strategy Squad]
+│       ├── onboarding-cro/     # [Activate Squad]
+│       ├── page-cro/           # [Convert Squad]
+│       ├── paid-ads/           # [Creative Squad]
+│       ├── paywall-upgrade.../  # [Activate Squad]
+│       ├── popup-cro/          # [Convert Squad]
+│       ├── pricing-strategy/   # [Strategy Squad]
+│       ├── product-marketing-context/  # [Foundation]
+│       ├── programmatic-seo/   # [Creative Squad]
+│       ├── referral-program/   # [Activate Squad]
+│       ├── schema-markup/      # [Creative Squad]
+│       ├── seo-audit/          # [Measure Squad]
+│       ├── signup-flow-cro/    # [Convert Squad]
+│       └── social-content/     # [Creative Squad]
 ├── .claude/
-│   └── skills/              # Symlinks to .agents/skills/ for Claude Code discovery
-├── .git/
-├── CLAUDE.md                # This file
-├── PROJECT_PROPOSAL.md      # Full project proposal and feasibility analysis
-└── README.md                # Project description
+│   ├── hooks/
+│   │   └── session-start.sh    # Installs deps in remote environments
+│   ├── settings.json           # Hooks + Railway MCP server config
+│   └── skills/                 # Symlinks to .agents/skills/
+├── index.ts                    # Future orchestration entry point
+├── index.test.ts               # Smoke tests
+├── package.json                # Bun project with Playwright
+├── tsconfig.json               # TypeScript strict config
+├── CLAUDE.md                   # This file
+├── PROJECT_PROPOSAL.md         # Full project blueprint
+└── README.md                   # Project description
 ```
 
 ## Architecture
 
-### Skill-Based Agent System
+### Team Structure
 
-Each skill is a self-contained marketing expert defined by:
-- **SKILL.md** — Persona, workflow, principles, output format, and cross-skill references
-- **references/*.md** — Templates, frameworks, benchmarks, and examples (25 files across 18 skills)
+```
+MARKETING DIRECTOR (Supervisor Agent — Claude Opus)
+  │
+  ├── STRATEGY SQUAD — Plans what to do and why
+  │   content-strategy, pricing-strategy, launch-strategy,
+  │   marketing-ideas, marketing-psychology, competitor-alternatives
+  │
+  ├── CREATIVE SQUAD — Produces content and copy
+  │   copywriting, copy-editing, social-content, cold-email,
+  │   paid-ads, programmatic-seo, schema-markup
+  │
+  ├── CONVERT SQUAD — Optimizes conversion touchpoints
+  │   page-cro, form-cro, signup-flow-cro, popup-cro, free-tool-strategy
+  │
+  ├── ACTIVATE SQUAD — Turns signups into retained users
+  │   onboarding-cro, email-sequence, paywall-upgrade-cro, referral-program
+  │
+  └── MEASURE SQUAD — Closes the feedback loop
+      analytics-tracking, ab-test-setup, seo-audit
+```
 
 ### Shared Context Model
 
-The `product-marketing-context` skill creates `.claude/product-marketing-context.md` — a 12-section document covering product overview, audience, personas, pain points, competitors, differentiation, objections, customer language, brand voice, proof points, and goals. **25 of 26 skills check this file before doing any work**, enabling context-once-use-everywhere behavior.
+The `product-marketing-context` skill creates `.claude/product-marketing-context.md` — a 12-section document covering product, audience, positioning, voice, and goals. **25 of 26 agents read this before doing any work.**
 
-### Funnel-Aligned Pipeline
+### Inter-Agent Protocol
+
+Agents communicate via a shared workspace:
 
 ```
-FOUNDATION:    product-marketing-context
-AWARENESS:     content-strategy → programmatic-seo → social-content → paid-ads → marketing-ideas
-CONSIDERATION: competitor-alternatives → pricing-strategy → copywriting → copy-editing → schema-markup → cold-email → marketing-psychology
-CONVERSION:    page-cro → form-cro → signup-flow-cro → popup-cro → free-tool-strategy
-ACTIVATION:    onboarding-cro → email-sequence → paywall-upgrade-cro → referral-program → launch-strategy
-MEASUREMENT:   analytics-tracking → ab-test-setup → seo-audit
+context/       → product-marketing-context.md (team wiki)
+tasks/         → {task-id}.md (active assignments from Director)
+outputs/       → {squad}/{skill}/{task-id}.md (agent deliverables)
+reviews/       → {task-id}-review.md (agent feedback on each other)
+metrics/       → {date}-report.md (performance data from Measure Squad)
+memory/        → learnings.md (what worked, what failed)
 ```
 
-### Cross-Skill Dependencies
+### 24/7 Runtime Engine
 
-Skills reference each other in "Related Skills" sections. Key hub skills:
-- **product-marketing-context** — referenced by 25/26 skills
-- **copywriting** — referenced by page-cro, cold-email, pricing-strategy, popup-cro, email-sequence
-- **ab-test-setup** — referenced by all 6 CRO skills + analytics-tracking + copy-editing
-- **page-cro** — referenced by form-cro, popup-cro, paid-ads, copywriting, free-tool-strategy
+```
+Scheduler (cron) → Daily social content, weekly content pipeline,
+                   monthly CRO sprint, quarterly pricing review
+Event Bus        → Traffic drops, conversion changes, competitor moves,
+                   A/B test significance → trigger response pipelines
+Task Queue       → Priority-based (P0-P3), 3 parallel agents,
+                   retries with backoff, dead letter queue
+```
+
+### Feedback Loop
+
+```
+SET GOALS → PLAN (Strategy) → CREATE (Creative) → OPTIMIZE (Convert)
+    ↑         → ACTIVATE (Activate) → MEASURE (Measure) → LEARN (Director)
+    └─────────────────────────────────────────────────────────────┘
+```
+
+The loop never terminates. Measure feeds data back to Director, who iterates or ships.
 
 ## Common Commands
 
-### Skill Installation
-```bash
-npx skills add coreyhaines31/marketingskills --yes
+### Skill Invocation (current — manual mode)
 ```
-
-### Skill Invocation (via Claude Code)
-```
-/product-marketing-context   # Start here — establish product context
+/product-marketing-context   # Foundation — establish product context
 /content-strategy            # Plan content pillars and topics
 /copywriting                 # Write marketing page copy
 /copy-editing                # Edit existing copy (7 sweeps)
@@ -100,41 +137,53 @@ npx skills add coreyhaines31/marketingskills --yes
 /pricing-strategy            # Design pricing and packaging
 ```
 
+### Development
+```bash
+bun install                  # Install dependencies
+bun test                     # Run tests
+bunx tsc --noEmit            # Type check
+bunx playwright test         # Run Playwright tests
+```
+
+### Skill Installation
+```bash
+npx skills add coreyhaines31/marketingskills --yes
+```
+
 ## Development Guidelines
 
 ### For AI Assistants
 
-When working on this repository:
+1. **Always check for `.claude/product-marketing-context.md` first.** Read it before asking redundant questions about the product.
+2. **Skills are defined in `.agents/skills/<name>/SKILL.md`.** Read the SKILL.md before producing any marketing output.
+3. **Reference files supplement skills.** Check `references/*.md` in the skill directory for templates, frameworks, and examples.
+4. **Follow the skill's output format.** Each SKILL.md defines a specific output structure.
+5. **Suggest related skills.** Recommend next skills from the "Related Skills" section after completing a workflow.
+6. **Tech stack is Bun + TypeScript.** The orchestration layer will be built with Bun, Claude Agent SDK, BullMQ, and PostgreSQL.
 
-1. **Always check for `.claude/product-marketing-context.md` first.** If it exists, read it before asking the user redundant questions about their product.
-2. **Skills are defined in `.agents/skills/<name>/SKILL.md`.** Read the SKILL.md to understand the skill's workflow, principles, and expected output format before producing any marketing output.
-3. **Reference files supplement skills.** Check for `references/*.md` in the skill directory — these contain templates, frameworks, and examples that should inform your output.
-4. **Follow the skill's output format.** Each SKILL.md defines a specific output structure. Adhere to it for consistency.
-5. **Suggest related skills.** After completing a skill's workflow, recommend relevant next skills from the "Related Skills" section.
-6. **Technology stack for the orchestration layer is not yet decided.** If asked to build automation, confirm the intended stack (Node.js/TypeScript recommended) with the user.
+### Conventions
 
-### Conventions to Follow
+- **Commit messages**: Conventional commit format (`feat:`, `fix:`, `docs:`, `chore:`)
+- **Branch naming**: Descriptive names (e.g., `feat/director-agent`, `feat/pipeline-engine`)
+- **Documentation**: Keep CLAUDE.md and PROJECT_PROPOSAL.md in sync with project state
+- **Skill modifications**: Preserve metadata headers and product-marketing-context checks
+- **Environment variables**: Never commit secrets. Use `.env` files (gitignored)
 
-- **Commit messages**: Conventional commit format (`feat:`, `fix:`, `docs:`, `chore:`).
-- **Branch naming**: Descriptive names (e.g., `feat/content-writer-skill`, `fix/strategy-output-format`).
-- **Documentation**: Keep this CLAUDE.md and PROJECT_PROPOSAL.md in sync with project state.
-- **Skill modifications**: When editing skills, preserve the metadata header (name, description, version) and the product-marketing-context check.
-- **Environment variables**: Never commit API keys. Use `.env` files (gitignored) with `.env.example` templates.
+### What to Build Next
 
-### Key Decisions Still Needed
-
-- Programming language for the orchestration layer (Node.js/TypeScript recommended)
-- Session persistence and context storage strategy
-- MCP server integrations for external marketing tools
-- Web UI framework (if building a SaaS product)
-- Deployment target and infrastructure
+1. **Marketing Director agent** — supervisor that decomposes goals, assigns squads, reviews outputs
+2. **Shared workspace** — file-based workspace structure for inter-agent handoffs
+3. **Agent executor** — loads SKILL.md + context, calls Claude API, writes output
+4. **Pipeline engine** — chains agents sequentially and in parallel
+5. **Task queue** — BullMQ priority queue for 24/7 operation
+6. **Scheduler + event bus** — cron pipelines and webhook-triggered responses
 
 ## Project Documentation
 
-See **[PROJECT_PROPOSAL.md](PROJECT_PROPOSAL.md)** for the complete project proposal including:
-- Feasibility assessment
-- Technical requirements
-- Target audience analysis
-- Service delivery framework
-- Implementation roadmap (5 phases)
-- Resource requirements and cost estimates
+See **[PROJECT_PROPOSAL.md](PROJECT_PROPOSAL.md)** for the complete blueprint:
+- 24/7 autonomous team architecture (5 squads + Director)
+- Inter-agent communication protocol
+- Runtime engine design (scheduler, event bus, queue)
+- Feedback loop architecture
+- Implementation roadmap (5 phases, 20 weeks)
+- Technical stack and MCP server integrations
