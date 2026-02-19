@@ -26,6 +26,9 @@ import { PipelineFactory } from "./pipeline-factory.ts";
 import { ReviewEngine } from "./review-engine.ts";
 import { EscalationEngine } from "./escalation.ts";
 import { routeGoal } from "./squad-router.ts";
+import type { ClaudeClient } from "../agents/claude-client.ts";
+import { AgentExecutor } from "../agents/executor.ts";
+import type { ExecutorConfig, ExecutionResult } from "../agents/executor.ts";
 
 // ── Goal ID Generator ────────────────────────────────────────────────────────
 
@@ -149,15 +152,21 @@ export class MarketingDirector {
   private readonly pipelineFactory: PipelineFactory;
   private readonly reviewEngine: ReviewEngine;
   private readonly escalationEngine: EscalationEngine;
+  private readonly client?: ClaudeClient;
+  private readonly executorConfig?: ExecutorConfig;
 
   constructor(
     private readonly workspace: WorkspaceManager,
     config?: Partial<DirectorConfig>,
+    client?: ClaudeClient,
+    executorConfig?: ExecutorConfig,
   ) {
     this.config = { ...DEFAULT_DIRECTOR_CONFIG, ...config };
+    this.client = client;
+    this.executorConfig = executorConfig;
     this.goalDecomposer = new GoalDecomposer(PIPELINE_TEMPLATES);
     this.pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES);
-    this.reviewEngine = new ReviewEngine(this.config);
+    this.reviewEngine = new ReviewEngine(this.config, client);
     this.escalationEngine = new EscalationEngine(this.config);
   }
 
@@ -284,6 +293,7 @@ export class MarketingDirector {
 
   /**
    * Review a completed task and produce a DirectorDecision.
+   * Uses structural validation only (synchronous review engine).
    */
   async reviewCompletedTask(taskId: string): Promise<DirectorDecision> {
     const task = await this.workspace.readTask(taskId);
@@ -310,13 +320,83 @@ export class MarketingDirector {
     // Get existing reviews for this task (listReviews returns [] if none exist)
     const existingReviews = await this.workspace.listReviews(taskId);
 
-    // Evaluate
+    // Evaluate (structural only)
     const decision = this.reviewEngine.evaluateTask(
       task,
       outputContent,
       existingReviews,
     );
 
+    // Apply decision side effects
+    await this.applyDecision(taskId, decision);
+
+    return decision;
+  }
+
+  /**
+   * Execute a task via the Agent Executor, then run semantic review via Claude Opus.
+   * Requires ClaudeClient and ExecutorConfig to be provided at construction time.
+   *
+   * Returns the execution result, director decision, and total cost
+   * (execution + semantic review — EC-4).
+   */
+  async executeAndReviewTask(
+    taskId: string,
+    budgetState?: BudgetState,
+  ): Promise<{
+    execution: ExecutionResult;
+    decision: DirectorDecision;
+    totalCost: number;
+  }> {
+    if (!this.client) {
+      throw new Error("ClaudeClient required for executeAndReviewTask");
+    }
+    if (!this.executorConfig) {
+      throw new Error("ExecutorConfig required for executeAndReviewTask");
+    }
+
+    const task = await this.workspace.readTask(taskId);
+
+    // Budget gate
+    if (budgetState && !this.shouldExecuteTask(task, budgetState)) {
+      throw new Error(
+        `Task ${taskId} blocked by budget (priority ${task.priority}, level ${budgetState.level})`,
+      );
+    }
+
+    // Execute
+    const executor = new AgentExecutor(
+      this.client,
+      this.workspace,
+      this.executorConfig,
+    );
+    const execution = await executor.executeTask(task, budgetState);
+
+    // Semantic review
+    const existingReviews = await this.workspace.listReviews(taskId);
+    const { decision, reviewCost } =
+      await this.reviewEngine.evaluateTaskSemantic(
+        task,
+        execution.content,
+        existingReviews,
+      );
+
+    // Apply decision side effects
+    await this.applyDecision(taskId, decision);
+
+    const totalCost = execution.metadata.estimatedCost + reviewCost;
+
+    return { execution, decision, totalCost };
+  }
+
+  /**
+   * Apply a DirectorDecision's side effects: write review, follow-up tasks,
+   * update status, and append learning.
+   */
+  private async applyDecision(
+    taskId: string,
+    decision: DirectorDecision,
+  ): Promise<void> {
     // Write the review
     if (decision.review) {
       await this.workspace.writeReview(decision.review);
@@ -349,8 +429,6 @@ export class MarketingDirector {
     if (decision.learning) {
       await this.workspace.appendLearning(decision.learning);
     }
-
-    return decision;
   }
 
   /**

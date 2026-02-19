@@ -6,6 +6,12 @@ import type { Review } from "../../types/review.ts";
 import type { Goal, BudgetState, DirectorConfig } from "../types.ts";
 import { DEFAULT_DIRECTOR_CONFIG } from "../types.ts";
 import { FileSystemWorkspaceManager } from "../../workspace/workspace-manager.ts";
+import type {
+  ClaudeClient,
+  ClaudeMessageParams,
+  ClaudeMessageResult,
+} from "../../agents/claude-client.ts";
+import { MODEL_MAP } from "../../agents/claude-client.ts";
 
 // ── Test Workspace ───────────────────────────────────────────────────────────
 
@@ -144,4 +150,48 @@ We identified several key areas for improvement based on CRO best practices.
 
 Estimated conversion lift: 15-25% based on similar optimizations.
 `;
+}
+
+// ── Mock Claude Client (EC-8) ───────────────────────────────────────────────
+
+/**
+ * Create a mock ClaudeClient for testing. Supports:
+ * - Static response (all calls return the same result)
+ * - Dynamic/sequence-based responses via callback (different per call)
+ * - Records all calls for assertion
+ */
+export function createMockClaudeClient(
+  handler?:
+    | Partial<ClaudeMessageResult>
+    | ((
+        params: ClaudeMessageParams,
+        callIndex: number,
+      ) => Partial<ClaudeMessageResult>),
+): ClaudeClient & { calls: ClaudeMessageParams[] } {
+  const calls: ClaudeMessageParams[] = [];
+  let callIndex = 0;
+
+  const defaultResult: ClaudeMessageResult = {
+    content: createTestOutput(),
+    model: MODEL_MAP.sonnet,
+    inputTokens: 1000,
+    outputTokens: 500,
+    stopReason: "end_turn",
+    durationMs: 2500,
+  };
+
+  return {
+    calls,
+    createMessage: async (params) => {
+      calls.push(params);
+      const currentIndex = callIndex++;
+      if (typeof handler === "function") {
+        return { ...defaultResult, ...handler(params, currentIndex) };
+      }
+      if (handler) {
+        return { ...defaultResult, ...handler };
+      }
+      return defaultResult;
+    },
+  };
 }

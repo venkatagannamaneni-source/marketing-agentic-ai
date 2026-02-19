@@ -40,6 +40,7 @@ export { PipelineFactory } from "./pipeline-factory.ts";
 
 // ── Review Engine ────────────────────────────────────────────────────────────
 export { ReviewEngine } from "./review-engine.ts";
+export type { SemanticReviewResult } from "./review-engine.ts";
 
 // ── Escalation Engine ────────────────────────────────────────────────────────
 export { EscalationEngine } from "./escalation.ts";

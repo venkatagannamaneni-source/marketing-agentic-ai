@@ -90,6 +90,28 @@ export {
   PIPELINE_TEMPLATES,
   loadSkillMeta,
   loadAllSkills,
+  // Claude Client
+  type ClaudeClient,
+  type ClaudeMessageParams,
+  type ClaudeMessage,
+  type ClaudeMessageResult,
+  type ExecutionErrorCode,
+  ExecutionError,
+  MODEL_MAP,
+  COST_PER_MILLION_TOKENS,
+  estimateCost,
+  AnthropicClaudeClient,
+  // Model Selector
+  selectModelTier,
+  // Prompt Builder
+  type BuiltPrompt,
+  buildAgentPrompt,
+  // Agent Executor
+  type ExecutorConfig,
+  type ExecutionResult,
+  type ExecutionMetadata,
+  AgentExecutor,
+  DEFAULT_EXECUTOR_CONFIG,
 } from "./agents/index.ts";
 
 // ── Director ─────────────────────────────────────────────────────────────────
@@ -107,6 +129,7 @@ export type {
   BudgetLevel,
   BudgetState,
   DirectorConfig,
+  SemanticReviewResult,
 } from "./director/index.ts";
 
 export {
