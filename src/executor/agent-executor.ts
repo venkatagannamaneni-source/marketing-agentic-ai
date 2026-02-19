@@ -7,6 +7,7 @@ import type {
   ClaudeClient,
   ClaudeResponse,
   ExecutionResult,
+  ExecutionErrorCode,
   ExecutorConfig,
 } from "./types.ts";
 import { ExecutionError } from "./types.ts";
@@ -331,9 +332,7 @@ export class AgentExecutor {
       durationMs: Date.now() - startTime,
       error: new ExecutionError(
         err.message,
-        err.code as ExecutionResult["error"] extends ExecutionError
-          ? ExecutionError["code"]
-          : never,
+        err.code as ExecutionErrorCode,
         task.id,
         err.cause,
       ),

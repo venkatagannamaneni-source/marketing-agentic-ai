@@ -13,15 +13,16 @@ export function cancellableSleep(
       return;
     }
 
-    const timer = setTimeout(resolve, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new ExecutionError("Aborted", "ABORTED", ""));
+    };
 
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new ExecutionError("Aborted", "ABORTED", ""));
-      },
-      { once: true },
-    );
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }

@@ -336,10 +336,9 @@ describe("AgentExecutor — API errors and retries", () => {
     const result = await executor.execute(task);
 
     expect(result.status).toBe("completed");
-    // 1 failed call + 1 successful call = 2 total calls recorded
-    // (first call throws before recording in mock, so only successful one recorded)
-    // Actually: mock records call THEN checks error, so both recorded
-    expect(client.calls.length).toBeGreaterThanOrEqual(1);
+    // Mock records the call before checking error, so both calls are recorded:
+    // 1 failed call (rate limited) + 1 successful retry = 2 total
+    expect(client.calls).toHaveLength(2);
   });
 
   it("fails after all retries exhausted", async () => {
@@ -392,6 +391,63 @@ describe("AgentExecutor — API errors and retries", () => {
 
     expect(result.status).toBe("failed");
     expect(result.error?.code).toBe("API_ERROR");
+  });
+
+  it("fails immediately with no retries when maxRetries is 0", async () => {
+    const task = makeTask();
+    await writeTaskToWorkspace(task);
+
+    client.setError(
+      new ExecutionError("rate limited", "API_RATE_LIMITED", ""),
+      false, // persistent
+    );
+
+    const zeroRetryConfig = createDefaultConfig({
+      projectRoot: PROJECT_ROOT,
+      maxRetries: 0,
+      retryDelayMs: 10,
+      defaultTimeoutMs: 10_000,
+    });
+
+    const executor = new AgentExecutor(client, workspace, zeroRetryConfig);
+    const result = await executor.execute(task);
+
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("API_RATE_LIMITED");
+    // Only 1 call — no retry attempts
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it("aborts during retry backoff sleep", async () => {
+    const task = makeTask();
+    await writeTaskToWorkspace(task);
+
+    // First call fails with retryable error, then backoff sleep starts
+    client.setError(
+      new ExecutionError("rate limited", "API_RATE_LIMITED", ""),
+      false, // persistent so retry would also fail
+    );
+
+    const slowRetryConfig = createDefaultConfig({
+      projectRoot: PROJECT_ROOT,
+      maxRetries: 3,
+      retryDelayMs: 5000, // long delay to ensure abort fires during sleep
+      defaultTimeoutMs: 30_000,
+    });
+
+    const controller = new AbortController();
+    const executor = new AgentExecutor(client, workspace, slowRetryConfig);
+    const promise = executor.execute(task, { signal: controller.signal });
+
+    // Abort after first call fails and retry sleep begins
+    setTimeout(() => controller.abort(), 100);
+
+    const result = await promise;
+
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("ABORTED");
+    // Only 1 call — aborted during retry sleep before second attempt
+    expect(client.calls).toHaveLength(1);
   });
 });
 
