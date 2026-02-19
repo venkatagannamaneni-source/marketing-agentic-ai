@@ -52,6 +52,8 @@ export type {
   LearningEntry,
 } from "./workspace.ts";
 
+export type { GoalCategory, Goal, GoalPhase, GoalPlan } from "./goal.ts";
+
 // ── Runtime value re-exports ─────────────────────────────────────────────────
 export {
   SQUAD_NAMES,
@@ -61,7 +63,14 @@ export {
   getSquadSkills,
 } from "./agent.ts";
 
-export { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES } from "./task.ts";
+export {
+  PRIORITIES,
+  PRIORITY_LABELS,
+  TASK_STATUSES,
+  VALID_TRANSITIONS,
+  validateTransition,
+  InvalidTransitionError,
+} from "./task.ts";
 
 export { REVIEW_VERDICTS } from "./review.ts";
 
@@ -77,3 +86,5 @@ export {
 } from "./health.ts";
 
 export { WORKSPACE_DIRS } from "./workspace.ts";
+
+export { GOAL_CATEGORIES } from "./goal.ts";

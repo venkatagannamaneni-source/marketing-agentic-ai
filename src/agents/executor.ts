@@ -2,8 +2,14 @@ import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ModelTier } from "../types/agent.ts";
 import { SKILL_SQUAD_MAP, FOUNDATION_SKILL } from "../types/agent.ts";
-import type { Task } from "../types/task.ts";
+import type { Task, TaskStatus } from "../types/task.ts";
 import type { BudgetState } from "../director/types.ts";
+
+const EXECUTABLE_STATUSES: ReadonlySet<TaskStatus> = new Set([
+  "pending",
+  "assigned",
+  "revision",
+]);
 import type { WorkspaceManager } from "../workspace/workspace-manager.ts";
 import { loadSkillMeta } from "./skill-loader.ts";
 import { buildAgentPrompt } from "./prompt-builder.ts";
@@ -65,9 +71,19 @@ export class AgentExecutor {
   async executeTask(
     task: Task,
     budgetState?: BudgetState,
+    signal?: AbortSignal,
   ): Promise<ExecutionResult> {
     // EC-7: Validate projectRoot on first call
     await this.ensureValidProjectRoot();
+
+    // 0. Status gate — only pending, assigned, or revision tasks are executable
+    if (!EXECUTABLE_STATUSES.has(task.status)) {
+      throw new ExecutionError(
+        `Task ${task.id} status "${task.status}" is not executable (must be pending, assigned, or revision)`,
+        "TASK_NOT_EXECUTABLE",
+        false,
+      );
+    }
 
     // 1. Budget gate
     if (budgetState?.level === "exhausted") {
@@ -112,6 +128,7 @@ export class AgentExecutor {
         messages: [{ role: "user", content: prompt.userMessage }],
         maxTokens: this.config.defaultMaxTokens,
         timeoutMs: this.config.defaultTimeoutMs,
+        signal,
       });
 
       content = result.content;
@@ -138,6 +155,7 @@ export class AgentExecutor {
           ],
           maxTokens: this.config.defaultMaxTokens,
           timeoutMs: this.config.defaultTimeoutMs,
+          signal,
         });
 
         retryCount = 1;

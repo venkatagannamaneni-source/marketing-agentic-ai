@@ -104,6 +104,7 @@ describe("CompletionRouter", () => {
       await workspace.writeOutput("creative", "copywriting", task.id, "# Great copy\n\nSome marketing copy here.");
 
       // Mark task as completed (required for review)
+      await workspace.updateTaskStatus(task.id, "in_progress");
       await workspace.updateTaskStatus(task.id, "completed");
 
       const result = createTestExecutionResult({ taskId: task.id });

@@ -48,6 +48,9 @@ export {
   PRIORITIES,
   PRIORITY_LABELS,
   TASK_STATUSES,
+  VALID_TRANSITIONS,
+  validateTransition,
+  InvalidTransitionError,
   REVIEW_VERDICTS,
   PIPELINE_STATUSES,
   EVENT_TYPES,
@@ -74,6 +77,10 @@ export {
   serializeReview,
   deserializeReview,
   serializeLearningEntry,
+  serializeGoal,
+  deserializeGoal,
+  serializeGoalPlan,
+  deserializeGoalPlan,
   validateTask,
   validateReview,
   type WorkspaceManager,
@@ -112,6 +119,9 @@ export {
   type ExecutionMetadata,
   AgentExecutor as ModularAgentExecutor,
   DEFAULT_EXECUTOR_CONFIG,
+  // Client Adapters
+  ModernToLegacyClientAdapter,
+  LegacyToModernClientAdapter,
 } from "./agents/index.ts";
 
 // ── Executor (Tasks 1-6 — used by pipeline and queue) ──────────────────────

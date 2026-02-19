@@ -130,7 +130,7 @@ describe("System Health", () => {
 });
 
 describe("Workspace Dirs", () => {
-  it("has 6 directories", () => {
+  it("has 7 directories", () => {
     expect(WORKSPACE_DIRS).toEqual([
       "context",
       "tasks",
@@ -138,6 +138,7 @@ describe("Workspace Dirs", () => {
       "reviews",
       "metrics",
       "memory",
+      "goals",
     ]);
   });
 });

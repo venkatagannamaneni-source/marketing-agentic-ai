@@ -15,6 +15,10 @@ export {
   serializeReview,
   deserializeReview,
   serializeLearningEntry,
+  serializeGoal,
+  deserializeGoal,
+  serializeGoalPlan,
+  deserializeGoalPlan,
 } from "./markdown.ts";
 
 export { validateTask, validateReview } from "./validation.ts";

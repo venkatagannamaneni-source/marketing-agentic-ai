@@ -427,4 +427,104 @@ describe("AgentExecutor", () => {
       );
     });
   });
+
+  describe("EXECUTABLE_STATUSES gate", () => {
+    it("rejects tasks with completed status", async () => {
+      const client = createMockClient();
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask({ status: "completed" });
+      await tw.workspace.writeTask(task);
+
+      await expect(executor.executeTask(task)).rejects.toThrow(
+        "not executable",
+      );
+    });
+
+    it("rejects tasks with approved status", async () => {
+      const client = createMockClient();
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask({ status: "approved" });
+      await tw.workspace.writeTask(task);
+
+      await expect(executor.executeTask(task)).rejects.toThrow(
+        "not executable",
+      );
+    });
+
+    it("accepts tasks with revision status", async () => {
+      const client = createMockClient();
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask({ status: "revision" });
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.executeTask(task);
+      expect(result.taskId).toBe(task.id);
+    });
+
+    it("throws TASK_NOT_EXECUTABLE error code", async () => {
+      const client = createMockClient();
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask({ status: "failed" });
+      await tw.workspace.writeTask(task);
+
+      try {
+        await executor.executeTask(task);
+        expect(true).toBe(false);
+      } catch (err) {
+        expect(err).toBeInstanceOf(ExecutionError);
+        expect((err as typeof ExecutionError.prototype).code).toBe(
+          "TASK_NOT_EXECUTABLE",
+        );
+      }
+    });
+  });
+
+  describe("signal parameter", () => {
+    it("passes signal to createMessage calls", async () => {
+      let capturedSignal: AbortSignal | undefined;
+      const client: ClaudeClient & { calls: ClaudeMessageParams[] } = {
+        calls: [],
+        async createMessage(params) {
+          capturedSignal = params.signal;
+          return {
+            content: "# Test\n\nContent.",
+            model: MODEL_MAP.sonnet,
+            inputTokens: 100,
+            outputTokens: 50,
+            stopReason: "end_turn",
+            durationMs: 500,
+          };
+        },
+      };
+
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const controller = new AbortController();
+      await executor.executeTask(task, undefined, controller.signal);
+
+      expect(capturedSignal).toBe(controller.signal);
+    });
+  });
 });

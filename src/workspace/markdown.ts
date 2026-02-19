@@ -8,6 +8,8 @@ import type {
 } from "../types/review.ts";
 import type { LearningEntry } from "../types/workspace.ts";
 import type { SkillName } from "../types/agent.ts";
+import type { Goal, GoalPlan, GoalPhase } from "../types/goal.ts";
+import { GOAL_CATEGORIES } from "../types/goal.ts";
 import { TASK_STATUSES, PRIORITIES } from "../types/task.ts";
 import { REVIEW_VERDICTS } from "../types/review.ts";
 import { SKILL_NAMES } from "../types/agent.ts";
@@ -293,6 +295,159 @@ export function serializeLearningEntry(entry: LearningEntry): string {
   lines.push(`- **Action:** ${entry.actionTaken}`);
   lines.push("");
   return lines.join("\n");
+}
+
+// ── Goal Serialization ──────────────────────────────────────────────────────
+
+export function serializeGoal(goal: Goal): string {
+  const lines = [
+    "---",
+    `id: ${goal.id}`,
+    `category: ${goal.category}`,
+    `priority: ${goal.priority}`,
+    `created_at: ${goal.createdAt}`,
+    `deadline: ${goal.deadline ?? "none"}`,
+    `metadata: ${JSON.stringify(goal.metadata)}`,
+    "---",
+    "",
+    `# Goal: ${goal.id}`,
+    "",
+    "## Description",
+    "",
+    goal.description,
+    "",
+  ];
+  return lines.join("\n");
+}
+
+export function deserializeGoal(markdown: string): Goal {
+  const fmMatch = markdown.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) throw new WorkspaceError("Invalid goal file: no frontmatter", "PARSE_ERROR");
+
+  const fm: Record<string, string> = {};
+  for (const line of fmMatch[1]!.split("\n")) {
+    const idx = line.indexOf(":");
+    if (idx > 0) {
+      fm[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+    }
+  }
+
+  const bodyMatch = markdown.match(/## Description\n\n([\s\S]*?)$/);
+  const description = bodyMatch ? bodyMatch[1]!.trim() : "";
+
+  let metadata: Record<string, unknown> = {};
+  try {
+    metadata = JSON.parse(fm.metadata ?? "{}");
+  } catch {
+    // ignore parse errors
+  }
+
+  if (!fm.id) throw new WorkspaceError("Invalid goal file: missing id", "PARSE_ERROR");
+  if (!fm.created_at) throw new WorkspaceError("Invalid goal file: missing created_at", "PARSE_ERROR");
+
+  const category = fm.category;
+  if (
+    !category ||
+    !(GOAL_CATEGORIES as readonly string[]).includes(category)
+  ) {
+    throw new WorkspaceError(`Invalid goal file: invalid category "${category}"`, "PARSE_ERROR");
+  }
+
+  const priority = fm.priority;
+  if (!priority || !(PRIORITIES as readonly string[]).includes(priority)) {
+    throw new WorkspaceError(`Invalid goal file: invalid priority "${priority}"`, "PARSE_ERROR");
+  }
+
+  return {
+    id: fm.id,
+    description,
+    category: category as Goal["category"],
+    priority: priority as Goal["priority"],
+    createdAt: fm.created_at,
+    deadline: fm.deadline === "none" || !fm.deadline ? null : fm.deadline,
+    metadata,
+  };
+}
+
+export function serializeGoalPlan(plan: GoalPlan): string {
+  const lines = [
+    "---",
+    `goal_id: ${plan.goalId}`,
+    `estimated_task_count: ${plan.estimatedTaskCount}`,
+    `pipeline_template: ${plan.pipelineTemplateName ?? "none"}`,
+    "---",
+    "",
+    `# Goal Plan: ${plan.goalId}`,
+    "",
+  ];
+
+  for (let i = 0; i < plan.phases.length; i++) {
+    const phase = plan.phases[i]!;
+    lines.push(`## Phase ${i + 1}: ${phase.name}`);
+    lines.push("");
+    lines.push(phase.description);
+    lines.push("");
+    lines.push(`- **Parallel:** ${phase.parallel}`);
+    lines.push(
+      `- **Depends on:** ${phase.dependsOnPhase !== null ? `Phase ${phase.dependsOnPhase + 1}` : "none"}`,
+    );
+    lines.push(`- **Skills:** ${phase.skills.join(", ")}`);
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+export function deserializeGoalPlan(markdown: string): GoalPlan {
+  const { frontmatter: fm } = parseFrontmatter(markdown);
+
+  const goalId = fm.goal_id;
+  if (!goalId) throw new WorkspaceError("Invalid goal plan: missing goal_id", "PARSE_ERROR");
+
+  const estimatedTaskCount = parseInt(fm.estimated_task_count ?? "0", 10);
+  const pipelineTemplateName =
+    fm.pipeline_template === "none" || !fm.pipeline_template
+      ? null
+      : fm.pipeline_template;
+
+  // Parse phases from ## Phase N: Name sections
+  const phases: GoalPhase[] = [];
+  const phasePattern = /## Phase \d+: (.+)\n\n([\s\S]*?)(?=\n## Phase |\n*$)/g;
+  let match;
+  while ((match = phasePattern.exec(markdown)) !== null) {
+    const name = match[1]!.trim();
+    const block = match[2]!;
+
+    const descLines: string[] = [];
+    const lines = block.split("\n");
+    let parallel = false;
+    let dependsOnPhase: number | null = null;
+    let skills: SkillName[] = [];
+
+    for (const line of lines) {
+      if (line.startsWith("- **Parallel:**")) {
+        parallel = line.includes("true");
+      } else if (line.startsWith("- **Depends on:**")) {
+        const depMatch = line.match(/Phase (\d+)/);
+        dependsOnPhase = depMatch ? parseInt(depMatch[1]!, 10) - 1 : null;
+      } else if (line.startsWith("- **Skills:**")) {
+        const skillStr = line.replace("- **Skills:**", "").trim();
+        skills = skillStr.split(",").map((s) => s.trim()) as SkillName[];
+      } else if (!line.startsWith("- **")) {
+        descLines.push(line);
+      }
+    }
+
+    phases.push({
+      name,
+      description: descLines.join("\n").trim(),
+      skills,
+      parallel,
+      dependsOnPhase,
+    });
+  }
+
+  return { goalId, phases, estimatedTaskCount, pipelineTemplateName };
 }
 
 // ── Internal Helpers ─────────────────────────────────────────────────────────

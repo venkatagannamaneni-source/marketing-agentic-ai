@@ -2,7 +2,9 @@ import { mkdir, readFile, writeFile, readdir, unlink, stat } from "node:fs/promi
 import { resolve, relative, dirname } from "node:path";
 import type { WorkspaceConfig, WorkspacePaths, LearningEntry } from "../types/workspace.ts";
 import type { Task, TaskStatus, TaskFilter } from "../types/task.ts";
+import { validateTransition } from "../types/task.ts";
 import type { Review } from "../types/review.ts";
+import type { Goal, GoalPlan } from "../types/goal.ts";
 import type { SkillName, SquadName } from "../types/agent.ts";
 import { SKILL_NAMES, SKILL_SQUAD_MAP, SQUAD_NAMES } from "../types/agent.ts";
 import { WORKSPACE_DIRS } from "../types/workspace.ts";
@@ -14,6 +16,10 @@ import {
   serializeReview,
   deserializeReview,
   serializeLearningEntry,
+  serializeGoal,
+  deserializeGoal,
+  serializeGoalPlan,
+  deserializeGoalPlan,
 } from "./markdown.ts";
 
 // ── WorkspaceManager Interface ───────────────────────────────────────────────
@@ -62,6 +68,13 @@ export interface WorkspaceManager {
   appendLearning(entry: LearningEntry): Promise<void>;
   readLearnings(): Promise<string>;
 
+  // Goal operations
+  writeGoal(goal: Goal): Promise<void>;
+  readGoal(goalId: string): Promise<Goal>;
+  listGoals(): Promise<Goal[]>;
+  writeGoalPlan(plan: GoalPlan): Promise<void>;
+  readGoalPlan(goalId: string): Promise<GoalPlan>;
+
   // Metrics
   writeMetricsReport(date: string, content: string): Promise<void>;
   readMetricsReport(date: string): Promise<string>;
@@ -90,6 +103,9 @@ export function createWorkspacePaths(rootDir: string): WorkspacePaths {
     metricsFile: (date: string) => `${rootDir}/metrics/${date}-report.md`,
     memory: `${rootDir}/memory`,
     memoryFile: `${rootDir}/memory/learnings.md`,
+    goals: `${rootDir}/goals`,
+    goalFile: (goalId: string) => `${rootDir}/goals/${goalId}.md`,
+    goalPlanFile: (goalId: string) => `${rootDir}/goals/${goalId}-plan.md`,
   };
 }
 
@@ -268,6 +284,7 @@ export class FileSystemWorkspaceManager implements WorkspaceManager {
         );
       }
       const task = deserializeTask(content);
+      validateTransition(taskId, task.status, status);
       const updated: Task = {
         ...task,
         status,
@@ -379,6 +396,43 @@ export class FileSystemWorkspaceManager implements WorkspaceManager {
       }
       throw err;
     }
+  }
+
+  // ── Goal Operations ────────────────────────────────────────────────────
+
+  async writeGoal(goal: Goal): Promise<void> {
+    const content = serializeGoal(goal);
+    await this.writeFile(`goals/${goal.id}.md`, content);
+  }
+
+  async readGoal(goalId: string): Promise<Goal> {
+    const content = await this.readFile(`goals/${goalId}.md`);
+    return deserializeGoal(content);
+  }
+
+  async listGoals(): Promise<Goal[]> {
+    const files = await this.listFiles("goals");
+    const goals: Goal[] = [];
+    for (const file of files) {
+      if (file.endsWith("-plan.md")) continue;
+      const content = await this.readFile(`goals/${file}`);
+      try {
+        goals.push(deserializeGoal(content));
+      } catch {
+        // Skip malformed goal files
+      }
+    }
+    return goals;
+  }
+
+  async writeGoalPlan(plan: GoalPlan): Promise<void> {
+    const content = serializeGoalPlan(plan);
+    await this.writeFile(`goals/${plan.goalId}-plan.md`, content);
+  }
+
+  async readGoalPlan(goalId: string): Promise<GoalPlan> {
+    const content = await this.readFile(`goals/${goalId}-plan.md`);
+    return deserializeGoalPlan(content);
   }
 
   // ── Metrics ─────────────────────────────────────────────────────────────

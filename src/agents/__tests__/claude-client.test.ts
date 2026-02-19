@@ -8,15 +8,15 @@ import {
 
 describe("MODEL_MAP", () => {
   it("maps opus to correct model string", () => {
-    expect(MODEL_MAP.opus).toBe("claude-opus-4-20250514");
+    expect(MODEL_MAP.opus).toBe("claude-opus-4-6");
   });
 
   it("maps sonnet to correct model string", () => {
-    expect(MODEL_MAP.sonnet).toBe("claude-sonnet-4-20250514");
+    expect(MODEL_MAP.sonnet).toBe("claude-sonnet-4-5-20250929");
   });
 
   it("maps haiku to correct model string", () => {
-    expect(MODEL_MAP.haiku).toBe("claude-haiku-4-20250514");
+    expect(MODEL_MAP.haiku).toBe("claude-haiku-4-5-20251001");
   });
 
   it("has entries for all three tiers", () => {
