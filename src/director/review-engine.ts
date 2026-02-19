@@ -16,6 +16,8 @@ import type {
   DirectorConfig,
   Escalation,
 } from "./types.ts";
+import type { BudgetState } from "./types.ts";
+import type { ModelTier } from "../types/agent.ts";
 import type { ClaudeClient } from "../agents/claude-client.ts";
 import { MODEL_MAP, estimateCost } from "../agents/claude-client.ts";
 
@@ -178,6 +180,7 @@ export class ReviewEngine {
     task: Task,
     outputContent: string,
     existingReviews: readonly Review[],
+    budgetState?: BudgetState,
   ): Promise<SemanticReviewResult> {
     const reviewIndex = existingReviews.length;
     const structuralFindings: ReviewFinding[] = [];
@@ -229,9 +232,10 @@ export class ReviewEngine {
       return { decision, reviewCost: 0 };
     }
 
-    // 3. Perform semantic review via Claude Opus
+    // 3. Perform semantic review — uses opus by default, respects budget modelOverride
+    const reviewModelTier: ModelTier = budgetState?.modelOverride ?? "opus";
     const { findings: semanticFindings, cost: reviewCost } =
-      await this.performSemanticReview(task, outputContent);
+      await this.performSemanticReview(task, outputContent, reviewModelTier);
 
     // 4. Merge structural + semantic findings, deduplicate
     const allFindings = this.mergeFindings(
@@ -258,10 +262,13 @@ export class ReviewEngine {
   private buildDecisionFromFindings(
     task: Task,
     findings: ReviewFinding[],
-    revisionRequests: RevisionRequest[],
+    callerRevisionRequests: readonly RevisionRequest[],
     existingReviews: readonly Review[],
     reviewIndex: number,
   ): DirectorDecision {
+    // Build a local copy to avoid mutating the caller's array
+    const revisionRequests: RevisionRequest[] = [...callerRevisionRequests];
+
     // Determine verdict
     const hasCritical = findings.some((f) => f.severity === "critical");
     const hasMajor = findings.some((f) => f.severity === "major");
@@ -344,6 +351,7 @@ export class ReviewEngine {
   private async performSemanticReview(
     task: Task,
     outputContent: string,
+    modelTier: ModelTier = "opus",
   ): Promise<{ findings: ReviewFinding[]; cost: number }> {
     const systemPrompt = `You are the Marketing Director reviewing agent output for quality.
 
@@ -373,7 +381,7 @@ ${outputContent}`;
 
     try {
       const result = await this.client!.createMessage({
-        model: MODEL_MAP.opus,
+        model: MODEL_MAP[modelTier],
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
         maxTokens: 4096,
@@ -381,7 +389,7 @@ ${outputContent}`;
       });
 
       const cost = estimateCost(
-        "opus",
+        modelTier,
         result.inputTokens,
         result.outputTokens,
       );

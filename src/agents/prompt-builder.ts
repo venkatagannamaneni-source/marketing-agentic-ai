@@ -137,6 +137,14 @@ export async function buildAgentPrompt(
     );
   }
 
+  // Warn if core content (after dropping all references) still exceeds budget
+  if (estimatedTokens > maxContextTokens) {
+    warnings.push(
+      `Core prompt exceeds context window limit: ${estimatedTokens} estimated tokens > ${maxContextTokens} max. ` +
+        `The API call may fail or truncate input.`,
+    );
+  }
+
   return {
     systemPrompt,
     userMessage,

@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { WorkspaceManager } from "../workspace/workspace-manager.ts";
 import type { SkillName } from "../types/agent.ts";
-import { SKILL_SQUAD_MAP } from "../types/agent.ts";
+import { SKILL_SQUAD_MAP, FOUNDATION_SKILL } from "../types/agent.ts";
 import type { Priority, Task } from "../types/task.ts";
 import type { Review } from "../types/review.ts";
 import type { PipelineDefinition, PipelineRun } from "../types/pipeline.ts";
@@ -12,6 +12,7 @@ import type {
   GoalCategory,
   GoalPlan,
   GoalPhase,
+  DirectorAction,
   DirectorDecision,
   DirectorConfig,
   BudgetState,
@@ -298,7 +299,7 @@ export class MarketingDirector {
   async reviewCompletedTask(taskId: string): Promise<DirectorDecision> {
     const task = await this.workspace.readTask(taskId);
 
-    // Read the output
+    // Read the output — handle foundation skill's different output path
     let outputContent = "";
     try {
       const squad = SKILL_SQUAD_MAP[task.to];
@@ -307,6 +308,10 @@ export class MarketingDirector {
           squad,
           task.to,
           taskId,
+        );
+      } else if (task.to === FOUNDATION_SKILL) {
+        outputContent = await this.workspace.readFile(
+          "context/product-marketing-context.md",
         );
       }
     } catch (err: unknown) {
@@ -379,6 +384,7 @@ export class MarketingDirector {
         task,
         execution.content,
         existingReviews,
+        budgetState,
       );
 
     // Apply decision side effects
@@ -407,8 +413,9 @@ export class MarketingDirector {
       await this.workspace.writeTask(nextTask);
     }
 
-    // Update task status based on decision
-    const statusMap: Record<string, string> = {
+    // Update task status based on decision — typed map ensures
+    // exhaustiveness at compile time (no unsafe `as` cast needed).
+    const statusMap: Record<DirectorAction, Task["status"]> = {
       approve: "approved",
       goal_complete: "approved",
       pipeline_next: "approved",
@@ -418,12 +425,7 @@ export class MarketingDirector {
       goal_iterate: "completed",
     };
     const newStatus = statusMap[decision.action];
-    if (newStatus) {
-      await this.workspace.updateTaskStatus(
-        taskId,
-        newStatus as Task["status"],
-      );
-    }
+    await this.workspace.updateTaskStatus(taskId, newStatus);
 
     // Append learning if present
     if (decision.learning) {

@@ -118,7 +118,7 @@ export class AnthropicClaudeClient implements ClaudeClient {
       model: response.model,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
-      stopReason: response.stop_reason ?? "end_turn",
+      stopReason: response.stop_reason ?? "unknown",
       durationMs,
     };
   }
@@ -187,14 +187,17 @@ type ErrorClass =
   | "non_retryable";
 
 function classifyError(err: unknown): ErrorClass {
+  // Check timeout subclasses BEFORE the parent APIError class.
+  // APIConnectionTimeoutError extends APIConnectionError extends APIError,
+  // so the APIError check would match first and misclassify timeouts.
+  if (err instanceof Anthropic.APIConnectionTimeoutError) {
+    return "timeout";
+  }
+
   if (err instanceof Anthropic.APIError) {
     if (err.status === 429) return "rate_limited";
     if (err.status >= 500 && err.status < 600) return "server_error";
     return "non_retryable";
-  }
-
-  if (err instanceof Anthropic.APIConnectionTimeoutError) {
-    return "timeout";
   }
 
   // Bun/Node timeout errors
