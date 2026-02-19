@@ -46,6 +46,8 @@ export class SequentialPipelineEngine {
     // ── Validation ──────────────────────────────────────────────────────
 
     if (definition.steps.length === 0) {
+      this.updateRunStatus(run, "failed", config);
+      run.completedAt = new Date().toISOString();
       return this.buildPipelineResult(
         run,
         definition,
@@ -57,6 +59,8 @@ export class SequentialPipelineEngine {
     }
 
     if (!STARTABLE_STATUSES.has(run.status)) {
+      // Don't mutate run.status — it's already in a terminal state (completed/failed/running)
+      // and overwriting it would lose the original state information
       return this.buildPipelineResult(
         run,
         definition,
@@ -92,6 +96,7 @@ export class SequentialPipelineEngine {
       ) {
         // Check cancellation before each step
         if (config.signal?.aborted) {
+          run.completedAt = new Date().toISOString();
           this.updateRunStatus(run, "cancelled", config);
           return this.buildPipelineResult(
             run,
@@ -122,12 +127,12 @@ export class SequentialPipelineEngine {
         );
 
         stepResults.push(stepResult);
-        config.onStepComplete?.(stepResult);
+        this.safeOnStepComplete(config, stepResult);
 
         // Handle step outcome
         if (stepResult.status === "failed") {
-          this.updateRunStatus(run, "failed", config);
           run.completedAt = new Date().toISOString();
+          this.updateRunStatus(run, "failed", config);
           return this.buildPipelineResult(
             run,
             definition,
@@ -160,8 +165,8 @@ export class SequentialPipelineEngine {
       }
     } catch (err: unknown) {
       // Catch-all: should never reach here but ensures we never throw
-      this.updateRunStatus(run, "failed", config);
       run.completedAt = new Date().toISOString();
+      this.updateRunStatus(run, "failed", config);
       const pipelineErr =
         err instanceof PipelineError
           ? err
@@ -184,8 +189,8 @@ export class SequentialPipelineEngine {
 
     // ── All steps completed ─────────────────────────────────────────────
 
-    this.updateRunStatus(run, "completed", config);
     run.completedAt = new Date().toISOString();
+    this.updateRunStatus(run, "completed", config);
     return this.buildPipelineResult(
       run,
       definition,
@@ -497,7 +502,22 @@ export class SequentialPipelineEngine {
     config: PipelineEngineConfig,
   ): void {
     run.status = status;
-    config.onStatusChange?.(run);
+    try {
+      config.onStatusChange?.(run);
+    } catch {
+      // Best-effort: don't let callback errors break the pipeline
+    }
+  }
+
+  private safeOnStepComplete(
+    config: PipelineEngineConfig,
+    stepResult: StepResult,
+  ): void {
+    try {
+      config.onStepComplete?.(stepResult);
+    } catch {
+      // Best-effort: don't let callback errors break the pipeline
+    }
   }
 
   private collectOutputPaths(results: readonly ExecutionResult[]): string[] {

@@ -394,6 +394,9 @@ describe("SequentialPipelineEngine — failure handling", () => {
     expect(result.error).toBeInstanceOf(PipelineError);
     expect(result.error?.code).toBe("NO_STEPS");
     expect(client.calls).toHaveLength(0);
+    // BUG 2 fix: run.status should also be "failed"
+    expect(run.status).toBe("failed");
+    expect(run.completedAt).not.toBeNull();
   });
 
   it("returns ALREADY_RUNNING error for non-pending/non-paused run", async () => {
@@ -650,5 +653,195 @@ describe("SequentialPipelineEngine — edge cases", () => {
     expect(taskInputPaths).toContain(
       "outputs/strategy/content-strategy/prev-task.md",
     );
+  });
+});
+
+// ── Production Readiness: Bug Fix Regression Tests ──────────────────────────
+
+describe("SequentialPipelineEngine — run.status consistency (BUG 2)", () => {
+  it("sets run.status to 'failed' when definition has no steps", async () => {
+    const definition = createTestDefinition({ steps: [] });
+    const run = createTestRun();
+
+    const result = await engine.execute(definition, run, defaultConfig());
+
+    // result.status and run.status must always agree
+    expect(result.status).toBe("failed");
+    expect(run.status).toBe("failed");
+    expect(result.run.status).toBe("failed");
+    expect(run.completedAt).not.toBeNull();
+  });
+
+  it("preserves original run.status when ALREADY_RUNNING", async () => {
+    const definition = createTestDefinition();
+    const run = createTestRun({ status: "running" });
+
+    const result = await engine.execute(definition, run, defaultConfig());
+
+    // run.status should NOT be mutated — it was already "running"
+    expect(result.status).toBe("failed");
+    expect(run.status).toBe("running"); // preserved, not overwritten
+  });
+});
+
+describe("SequentialPipelineEngine — callback safety (BUG 3)", () => {
+  it("survives onStepComplete callback throwing", async () => {
+    const definition = createTestDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(
+      definition,
+      run,
+      defaultConfig({
+        onStepComplete: () => {
+          throw new Error("Callback exploded!");
+        },
+      }),
+    );
+
+    // Pipeline should complete successfully despite callback throwing
+    expect(result.status).toBe("completed");
+    expect(run.status).toBe("completed");
+    expect(result.stepResults).toHaveLength(3);
+  });
+
+  it("survives onStatusChange callback throwing", async () => {
+    const definition = createTestDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(
+      definition,
+      run,
+      defaultConfig({
+        onStatusChange: () => {
+          throw new Error("Status callback exploded!");
+        },
+      }),
+    );
+
+    // Pipeline should complete successfully despite callback throwing
+    expect(result.status).toBe("completed");
+    expect(run.status).toBe("completed");
+  });
+});
+
+describe("SequentialPipelineEngine — completedAt ordering (BUG 6)", () => {
+  it("sets completedAt BEFORE onStatusChange fires on completion", async () => {
+    let completedAtWhenNotified: string | null = null;
+    const definition = createTestDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    await engine.execute(
+      definition,
+      run,
+      defaultConfig({
+        onStatusChange: (r) => {
+          if (r.status === "completed") {
+            completedAtWhenNotified = r.completedAt;
+          }
+        },
+      }),
+    );
+
+    expect(completedAtWhenNotified).not.toBeNull();
+  });
+
+  it("sets completedAt BEFORE onStatusChange fires on failure", async () => {
+    let completedAtWhenNotified: string | null = null;
+    client = new MockClaudeClient(() => {
+      throw new ExecutionError("API error", "API_ERROR", "");
+    });
+    executor = new AgentExecutor(client, tw.workspace, executorConfig);
+    engine = new SequentialPipelineEngine(factory, executor, tw.workspace);
+
+    const definition = createTestDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    await engine.execute(
+      definition,
+      run,
+      defaultConfig({
+        onStatusChange: (r) => {
+          if (r.status === "failed") {
+            completedAtWhenNotified = r.completedAt;
+          }
+        },
+      }),
+    );
+
+    expect(completedAtWhenNotified).not.toBeNull();
+  });
+});
+
+describe("SequentialPipelineEngine — cancelled pipeline completedAt (BUG 7)", () => {
+  it("sets completedAt when pipeline is cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const definition = createTestDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    await engine.execute(
+      definition,
+      run,
+      defaultConfig({ signal: controller.signal }),
+    );
+
+    expect(run.status).toBe("cancelled");
+    expect(run.completedAt).not.toBeNull();
+  });
+
+  it("sets completedAt when cancelled between steps", async () => {
+    const controller = new AbortController();
+    const definition = createTestDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    await engine.execute(
+      definition,
+      run,
+      defaultConfig({
+        signal: controller.signal,
+        onStepComplete: (stepResult) => {
+          if (stepResult.stepIndex === 0) controller.abort();
+        },
+      }),
+    );
+
+    expect(run.status).toBe("cancelled");
+    expect(run.completedAt).not.toBeNull();
+  });
+});
+
+describe("SequentialPipelineEngine — review at last step (BUG 1)", () => {
+  it("completes when review is the last step and then resumed", async () => {
+    const definition = createTestDefinition({
+      id: "review-last",
+      steps: [
+        { type: "sequential", skill: "content-strategy" },
+        { type: "review", reviewer: "director" },
+      ],
+    });
+    const run = createTestRun({ pipelineId: definition.id });
+
+    // First execution pauses at review
+    const pausedResult = await engine.execute(
+      definition,
+      run,
+      defaultConfig(),
+    );
+    expect(pausedResult.status).toBe("paused");
+    expect(run.currentStepIndex).toBe(1);
+
+    // Resume: advances past the review step (index 2), loop doesn't execute
+    const resumedResult = await engine.execute(
+      definition,
+      run,
+      defaultConfig({ initialInputPaths: pausedResult.stepResults[0]!.outputPaths }),
+    );
+
+    expect(resumedResult.status).toBe("completed");
+    expect(resumedResult.stepResults).toHaveLength(0); // no steps after review
+    expect(run.status).toBe("completed");
+    expect(run.completedAt).not.toBeNull();
   });
 });
