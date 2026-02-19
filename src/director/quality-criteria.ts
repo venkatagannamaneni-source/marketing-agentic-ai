@@ -159,7 +159,7 @@ export const DEFAULT_SKILL_CRITERIA: Readonly<Record<string, SkillQualityCriteri
   },
   "schema-markup": {
     skill: "schema-markup",
-    dimensions: MEASURE_DIMENSIONS,
+    dimensions: CREATIVE_DIMENSIONS,
     threshold: DEFAULT_QUALITY_THRESHOLD,
     requiredSections: ["Schema"],
     minWordCount: 50,

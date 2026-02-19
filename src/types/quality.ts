@@ -33,6 +33,7 @@ export interface QualityScore {
 // ── Quality Thresholds ───────────────────────────────────────────────────────
 
 export interface QualityThreshold {
+  /** Reserved for future use — current verdict logic uses reviseBelow/rejectBelow only */
   readonly approveAbove: number;
   readonly reviseBelow: number;
   readonly rejectBelow: number;
