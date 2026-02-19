@@ -33,6 +33,11 @@ export class CompletionRouter {
 
       case "complete":
         return { type: "complete", taskId: task.id };
+
+      default: {
+        const _exhaustive: never = task.next;
+        throw new Error(`Unhandled task.next.type: ${(_exhaustive as { type: string }).type}`);
+      }
     }
   }
 
@@ -75,6 +80,11 @@ export class CompletionRouter {
           return { type: "enqueue_tasks", tasks: nextTasks };
         }
         return { type: "complete", taskId: task.id };
+      }
+
+      default: {
+        const _exhaustive: never = decision.action;
+        throw new Error(`Unhandled director action: ${_exhaustive as string}`);
       }
     }
   }

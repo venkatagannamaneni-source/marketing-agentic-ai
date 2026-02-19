@@ -75,7 +75,12 @@ export class TaskQueueManager {
     const budget = this.budgetProvider();
     const decision = this.budgetGate.check(task, budget);
 
-    if (decision !== "allow") {
+    if (decision === "block") {
+      await this.workspace.updateTaskStatus(task.id, "blocked");
+      return "deferred";
+    }
+
+    if (decision === "defer") {
       await this.workspace.updateTaskStatus(task.id, "deferred");
       return "deferred";
     }
@@ -110,11 +115,34 @@ export class TaskQueueManager {
   }
 
   /**
-   * Enqueue multiple tasks.
+   * Enqueue multiple tasks. Processes all tasks even if some fail.
    */
   async enqueueBatch(tasks: readonly Task[]): Promise<void> {
-    for (const task of tasks) {
-      await this.enqueue(task);
+    const results = await Promise.allSettled(
+      tasks.map((task) => this.enqueue(task)),
+    );
+
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]!;
+      if (result.status === "rejected") {
+        const taskId = tasks[i]?.id ?? "unknown";
+        const message = result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason);
+        // Best-effort: log but don't fail the batch
+        try {
+          await this.workspace.appendLearning({
+            timestamp: new Date().toISOString(),
+            agent: "director",
+            goalId: null,
+            outcome: "failure",
+            learning: `Failed to enqueue task ${taskId}: ${message}`,
+            actionTaken: "Task enqueue skipped; may need manual re-enqueue",
+          });
+        } catch {
+          // Best-effort
+        }
+      }
     }
   }
 
@@ -126,6 +154,11 @@ export class TaskQueueManager {
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
+
+    // Clear any stale timer before creating a new one
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+    }
 
     // Start periodic health check
     this.healthCheckTimer = setInterval(
@@ -256,28 +289,52 @@ export class TaskQueueManager {
   private wireWorkerEvents(): void {
     // On job completion: inspect routing action and re-enqueue if needed
     this.worker.on("completed", async (_job: unknown, result: unknown) => {
-      const jobResult = result as QueueJobResult | undefined;
-      if (!jobResult?.routingAction) return;
+      if (!result || typeof result !== "object") return;
+
+      const jobResult = result as QueueJobResult;
+      if (!jobResult.routingAction) return;
 
       const action = jobResult.routingAction;
 
-      if (action.type === "enqueue_tasks" && action.tasks.length > 0) {
-        await this.enqueueBatch(action.tasks);
+      switch (action.type) {
+        case "enqueue_tasks":
+          if (action.tasks.length > 0) {
+            await this.enqueueBatch(action.tasks);
+          }
+          break;
+        case "complete":
+        case "dead_letter":
+        case "deferred":
+          // No follow-up action needed; workspace already updated by router/worker
+          break;
       }
     });
 
     // On job failure (after all retries exhausted)
     this.worker.on("failed", async (job: unknown, error: unknown) => {
-      const typedJob = job as { data: QueueJobData } | undefined;
-      if (!typedJob?.data) return;
+      if (!job || typeof job !== "object" || !("data" in job)) return;
 
+      const typedJob = job as { data: QueueJobData };
       const { taskId, pipelineId } = typedJob.data;
 
       // Update task status in workspace
       try {
         await this.workspace.updateTaskStatus(taskId, "failed");
-      } catch {
-        // Best-effort
+      } catch (statusErr: unknown) {
+        // Task status is now inconsistent — log for debugging
+        const msg = statusErr instanceof Error ? statusErr.message : String(statusErr);
+        try {
+          await this.workspace.appendLearning({
+            timestamp: new Date().toISOString(),
+            agent: typedJob.data.skill as import("../types/agent.ts").SkillName,
+            goalId: typedJob.data.goalId,
+            outcome: "failure",
+            learning: `Failed to update task ${taskId} status to failed: ${msg}. Task may be in inconsistent state.`,
+            actionTaken: "Status update failed; manual intervention may be needed",
+          });
+        } catch {
+          // Double failure — nothing more we can do
+        }
       }
 
       // Track the failure
@@ -320,7 +377,10 @@ export class TaskQueueManager {
     if (await this.fallbackQueue.isEmpty()) return;
 
     const jobs = await this.fallbackQueue.drain();
-    for (const jobData of jobs) {
+    let failedIndex = -1;
+
+    for (let i = 0; i < jobs.length; i++) {
+      const jobData = jobs[i]!;
       try {
         await this.queue.add("process-task", jobData, {
           priority: taskPriorityToQueuePriority(jobData.priority),
@@ -334,9 +394,16 @@ export class TaskQueueManager {
           removeOnFail: false,
         });
       } catch {
-        // Redis went down again during drain — re-enqueue to fallback
-        await this.fallbackQueue.enqueue(jobData);
+        // Redis went down again — re-enqueue this job and all remaining
+        failedIndex = i;
         break;
+      }
+    }
+
+    // Re-enqueue any unprocessed jobs back to fallback
+    if (failedIndex >= 0) {
+      for (let i = failedIndex; i < jobs.length; i++) {
+        await this.fallbackQueue.enqueue(jobs[i]!);
       }
     }
   }

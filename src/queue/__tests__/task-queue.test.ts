@@ -157,7 +157,7 @@ describe("TaskQueueManager", () => {
       expect(updated.status).toBe("deferred");
     });
 
-    it("defers all tasks when budget is exhausted", async () => {
+    it("blocks all tasks when budget is exhausted and sets status to blocked", async () => {
       budgetState = createTestBudgetState("exhausted");
 
       const task = createTestTask({ priority: "P0" });
@@ -165,6 +165,11 @@ describe("TaskQueueManager", () => {
 
       const result = await manager.enqueue(task);
       expect(result).toBe("deferred");
+      expect(mockQueue.jobs).toHaveLength(0);
+
+      // Verify task status is "blocked" not "deferred"
+      const updated = await workspace.readTask(task.id);
+      expect(updated.status).toBe("blocked");
     });
   });
 
@@ -326,6 +331,116 @@ describe("TaskQueueManager", () => {
 
       const updated = await workspace.readTask("failing-task");
       expect(updated.status).toBe("failed");
+    });
+
+    it("pauses worker on cascading failure", async () => {
+      // Create 3 tasks for the same pipeline
+      const tasks = [
+        createTestTask({ id: "cf-1", pipelineId: "pipe-x" }),
+        createTestTask({ id: "cf-2", pipelineId: "pipe-x" }),
+        createTestTask({ id: "cf-3", pipelineId: "pipe-x" }),
+      ];
+      for (const t of tasks) await workspace.writeTask(t);
+
+      // Emit 3 failures for the same pipeline — triggers cascade threshold
+      for (const t of tasks) {
+        await mockWorker.emit(
+          "failed",
+          { data: createTestJobData({ taskId: t.id, pipelineId: "pipe-x" }) },
+          new Error("API error"),
+        );
+      }
+
+      // Worker should be paused due to cascading failures
+      expect(mockWorker.isRunning()).toBe(false);
+    });
+
+    it("ignores malformed job data", async () => {
+      // Should not throw when job data is missing
+      await mockWorker.emit("failed", null, new Error("bad"));
+      await mockWorker.emit("failed", {}, new Error("bad"));
+      await mockWorker.emit("failed", "not-an-object", new Error("bad"));
+    });
+  });
+
+  describe("worker event: completed edge cases", () => {
+    it("ignores null/undefined result", async () => {
+      // Should not throw
+      await mockWorker.emit("completed", { data: createTestJobData() }, null);
+      await mockWorker.emit("completed", { data: createTestJobData() }, undefined);
+      expect(mockQueue.jobs).toHaveLength(0);
+    });
+
+    it("ignores result without routingAction", async () => {
+      await mockWorker.emit("completed", { data: createTestJobData() }, {
+        executionResult: { taskId: "t1", status: "completed" },
+      });
+      expect(mockQueue.jobs).toHaveLength(0);
+    });
+
+    it("does not re-enqueue for complete routing action", async () => {
+      await mockWorker.emit("completed", { data: createTestJobData() }, {
+        executionResult: { taskId: "t1", status: "completed" },
+        routingAction: { type: "complete", taskId: "t1" },
+      });
+      expect(mockQueue.jobs).toHaveLength(0);
+    });
+  });
+
+  describe("enqueueBatch partial failures", () => {
+    it("processes all tasks even when some fail to enqueue", async () => {
+      const tasks = [
+        createTestTask({ id: "batch-1", priority: "P0" }),
+        createTestTask({ id: "batch-2", priority: "P0" }),
+        createTestTask({ id: "batch-3", priority: "P0" }),
+      ];
+      for (const t of tasks) await workspace.writeTask(t);
+
+      // Make the second add fail by toggling shouldThrowOnAdd after first
+      let addCount = 0;
+      const originalAdd = mockQueue.add.bind(mockQueue);
+      mockQueue.add = async (name, data, opts) => {
+        addCount++;
+        if (addCount === 2) throw new Error("Redis blip");
+        return originalAdd(name, data, opts);
+      };
+
+      await manager.enqueueBatch(tasks);
+
+      // First and third tasks should be enqueued; second falls back
+      expect(mockQueue.jobs).toHaveLength(2);
+    });
+  });
+
+  describe("fallback drain recovery", () => {
+    it("re-enqueues remaining jobs to fallback when Redis fails mid-drain", async () => {
+      // Manually populate fallback queue with 3 jobs
+      const { FallbackQueue } = await import("../fallback-queue.ts");
+      const fallback = new FallbackQueue(fallbackDir);
+
+      await fallback.enqueue(createTestJobData({ taskId: "fb-1", priority: "P0" }));
+      await fallback.enqueue(createTestJobData({ taskId: "fb-2", priority: "P1" }));
+      await fallback.enqueue(createTestJobData({ taskId: "fb-3", priority: "P2" }));
+
+      // Make queue.add fail after first job
+      let addCount = 0;
+      const originalAdd = mockQueue.add.bind(mockQueue);
+      mockQueue.add = async (name, data, opts) => {
+        addCount++;
+        if (addCount > 1) throw new Error("Redis went down again");
+        return originalAdd(name, data, opts);
+      };
+
+      // Start triggers drainFallbackQueue
+      await manager.start();
+
+      // First job was enqueued to BullMQ
+      expect(mockQueue.jobs).toHaveLength(1);
+      expect(mockQueue.jobs[0]!.data.taskId).toBe("fb-1");
+
+      // Remaining 2 jobs should be back in fallback
+      const remaining = await fallback.peek();
+      expect(remaining).toBe(2);
     });
   });
 });

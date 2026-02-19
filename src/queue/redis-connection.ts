@@ -26,7 +26,9 @@ class RedisConnectionManagerImpl implements RedisConnectionManager {
   private connected = false;
 
   constructor(private readonly client: RedisClient) {
-    this.connected = client.status === "ready" || client.status === "connect";
+    // With lazyConnect: true, status won't be "ready" at construction time.
+    // Only trust "ready" as connected; checkHealth() will update via ping.
+    this.connected = client.status === "ready";
   }
 
   getClient(): RedisClient {

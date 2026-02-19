@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm, readdir } from "node:fs/promises";
+import { mkdtemp, rm, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { FallbackQueue } from "../fallback-queue.ts";
@@ -123,6 +123,54 @@ describe("FallbackQueue", () => {
       await queue.enqueue(createTestJobData({ taskId: "t1" }));
       await queue.drain();
       expect(await queue.isEmpty()).toBe(true);
+    });
+  });
+
+  describe("corrupt file handling", () => {
+    it("skips files with invalid JSON", async () => {
+      await queue.enqueue(createTestJobData({ taskId: "good" }));
+
+      // Write a corrupt file that looks like a queue entry
+      await writeFile(
+        resolve(tempDir, "001-9999999999999-corrupt.json"),
+        "NOT VALID JSON{{{",
+        "utf-8",
+      );
+
+      const jobs = await queue.drain();
+      // Only the valid job should be returned
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]!.taskId).toBe("good");
+    });
+
+    it("skips files missing required fields", async () => {
+      await queue.enqueue(createTestJobData({ taskId: "valid" }));
+
+      // Write a valid JSON file missing taskId
+      await writeFile(
+        resolve(tempDir, "001-9999999999999-incomplete.json"),
+        JSON.stringify({ skill: "copywriting", priority: "P0" }),
+        "utf-8",
+      );
+
+      const jobs = await queue.drain();
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]!.taskId).toBe("valid");
+    });
+
+    it("leaves corrupt files on disk for inspection", async () => {
+      await writeFile(
+        resolve(tempDir, "001-9999999999999-bad.json"),
+        "CORRUPT",
+        "utf-8",
+      );
+
+      await queue.drain();
+
+      // Corrupt file should still be there
+      const files = await readdir(tempDir);
+      expect(files).toHaveLength(1);
+      expect(files[0]).toContain("bad");
     });
   });
 
