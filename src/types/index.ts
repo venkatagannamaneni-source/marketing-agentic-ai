@@ -88,3 +88,32 @@ export {
 export { WORKSPACE_DIRS } from "./workspace.ts";
 
 export { GOAL_CATEGORIES } from "./goal.ts";
+
+// ── Human Review ─────────────────────────────────────────────────────────────
+export type {
+  HumanReviewDecision,
+  HumanReviewStatus,
+  HumanReviewUrgency,
+  HumanFeedback,
+  HumanReviewItem,
+  HumanReviewFilter,
+  HumanReviewStats,
+} from "./human-review.ts";
+
+export {
+  HUMAN_REVIEW_DECISIONS,
+  HUMAN_REVIEW_STATUSES,
+  HUMAN_REVIEW_URGENCIES,
+} from "./human-review.ts";
+
+// ── Quality Scoring ──────────────────────────────────────────────────────────
+export type {
+  QualityDimension,
+  DimensionScore,
+  QualityScore,
+  QualityThreshold,
+  SkillDimensionCriteria,
+  SkillQualityCriteria,
+} from "./quality.ts";
+
+export { QUALITY_DIMENSIONS, DEFAULT_QUALITY_THRESHOLD } from "./quality.ts";

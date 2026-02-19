@@ -36,6 +36,19 @@ export type {
   WorkspaceConfig,
   WorkspacePaths,
   LearningEntry,
+  HumanReviewDecision,
+  HumanReviewStatus,
+  HumanReviewUrgency,
+  HumanFeedback,
+  HumanReviewItem,
+  HumanReviewFilter,
+  HumanReviewStats,
+  QualityDimension,
+  DimensionScore,
+  QualityScore,
+  QualityThreshold,
+  SkillDimensionCriteria,
+  SkillQualityCriteria,
 } from "./types/index.ts";
 
 // ── Type Constants ────────────────────────────────────────────────────────────
@@ -59,6 +72,11 @@ export {
   DEGRADATION_DESCRIPTIONS,
   COMPONENT_STATUSES,
   WORKSPACE_DIRS,
+  HUMAN_REVIEW_DECISIONS,
+  HUMAN_REVIEW_STATUSES,
+  HUMAN_REVIEW_URGENCIES,
+  QUALITY_DIMENSIONS,
+  DEFAULT_QUALITY_THRESHOLD,
 } from "./types/index.ts";
 
 // ── Workspace ─────────────────────────────────────────────────────────────────
@@ -68,6 +86,7 @@ export {
   generateTaskId,
   generateReviewId,
   generateRunId,
+  generateHumanReviewId,
   type FileLock,
   acquireLock,
   type ParsedMarkdown,
@@ -81,6 +100,8 @@ export {
   deserializeGoal,
   serializeGoalPlan,
   deserializeGoalPlan,
+  serializeHumanReview,
+  deserializeHumanReview,
   validateTask,
   validateReview,
   type WorkspaceManager,
@@ -164,6 +185,7 @@ export type {
   BudgetState,
   DirectorConfig,
   SemanticReviewResult,
+  QualityReviewResult,
 } from "./director/index.ts";
 
 export {
@@ -183,6 +205,11 @@ export {
   EscalationEngine,
   MarketingDirector,
   generateGoalId,
+  HumanReviewManager,
+  QualityScorer,
+  DEFAULT_SKILL_CRITERIA,
+  getSkillCriteria,
+  resolveThreshold,
 } from "./director/index.ts";
 
 // ── Pipeline Engine ──────────────────────────────────────────────────────────

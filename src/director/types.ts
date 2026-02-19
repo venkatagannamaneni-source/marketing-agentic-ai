@@ -109,6 +109,8 @@ export interface DirectorConfig {
     readonly throttlePercent: number;
     readonly criticalPercent: number;
   };
+  readonly qualityThresholds?: Partial<Record<string, import("../types/quality.ts").QualityThreshold>>;
+  readonly qualityCriteria?: Partial<Record<string, Partial<import("../types/quality.ts").SkillQualityCriteria>>>;
 }
 
 export const DEFAULT_DIRECTOR_CONFIG: DirectorConfig = {

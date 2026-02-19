@@ -27,6 +27,7 @@ import { routeGoal } from "./squad-router.ts";
 import type { ClaudeClient } from "../agents/claude-client.ts";
 import { AgentExecutor } from "../agents/executor.ts";
 import type { ExecutorConfig, ExecutionResult } from "../agents/executor.ts";
+import type { HumanReviewManager } from "./human-review-manager.ts";
 
 // ── Goal ID Generator ────────────────────────────────────────────────────────
 
@@ -49,16 +50,19 @@ export class MarketingDirector {
   private readonly escalationEngine: EscalationEngine;
   private readonly client?: ClaudeClient;
   private readonly executorConfig?: ExecutorConfig;
+  private readonly humanReviewManager?: HumanReviewManager;
 
   constructor(
     private readonly workspace: WorkspaceManager,
     config?: Partial<DirectorConfig>,
     client?: ClaudeClient,
     executorConfig?: ExecutorConfig,
+    humanReviewManager?: HumanReviewManager,
   ) {
     this.config = { ...DEFAULT_DIRECTOR_CONFIG, ...config };
     this.client = client;
     this.executorConfig = executorConfig;
+    this.humanReviewManager = humanReviewManager;
     this.goalDecomposer = new GoalDecomposer(PIPELINE_TEMPLATES);
     this.pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES);
     this.reviewEngine = new ReviewEngine(this.config, client);
@@ -313,6 +317,16 @@ export class MarketingDirector {
     if (decision.learning) {
       await this.workspace.appendLearning(decision.learning);
     }
+
+    // Create human review item on escalation
+    if (
+      decision.action === "escalate_human" &&
+      decision.escalation &&
+      this.humanReviewManager
+    ) {
+      const task = await this.workspace.readTask(taskId);
+      await this.humanReviewManager.escalateToHuman(task, decision.escalation);
+    }
   }
 
   /**
@@ -446,5 +460,12 @@ export class MarketingDirector {
    */
   getSystemPrompt(): string {
     return DIRECTOR_SYSTEM_PROMPT;
+  }
+
+  /**
+   * Access the human review manager (if configured).
+   */
+  getHumanReviewManager(): HumanReviewManager | undefined {
+    return this.humanReviewManager;
   }
 }
