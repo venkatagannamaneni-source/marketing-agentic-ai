@@ -134,20 +134,24 @@
 
 ## 3. Dependencies
 
-### Production
+> **Full rationale:** See [infrastructure-decisions.md](infrastructure-decisions.md) for detailed comparisons and elimination reasoning.
+
+### Production — Install at Phase 1 start
 
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `@anthropic-ai/sdk` | `^0.39` | Claude API client |
+| `drizzle-orm` | `^0.38` | Type-safe ORM (SQLite now, PostgreSQL later — same schema) |
 | `zod` | `^3.24` | Schema validation for agent outputs and task contracts |
 | `nanoid` | `^5` | Generate short, URL-safe task IDs |
 
-### Dev
+### Dev — Install at Phase 1 start
 
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `@types/bun` | latest | Bun type definitions (already installed) |
 | `typescript` | `^5` | TypeScript compiler (already peer dep) |
+| `drizzle-kit` | latest | Schema migrations and DB push |
 
 ### Deferred to Week 3
 
@@ -156,12 +160,19 @@
 | `bullmq` | Production task queue (replaces in-memory queue) |
 | `ioredis` | Redis client required by BullMQ |
 
-### What we do NOT need
+### Database strategy
 
-- **No Express/Hono** — no HTTP server in Phase 1 (CLI-only)
+- **Phase 1:** SQLite via `bun:sqlite` (built-in, zero infrastructure). Drizzle ORM provides the abstraction layer.
+- **Phase 2+:** PostgreSQL via `postgres` (postgres.js) or `Bun.sql` (built-in). One-line import change in Drizzle config.
+- **Phase 5:** Evaluate Supabase (PostgreSQL + auth + storage + realtime) if the all-in-one platform fits.
+
+### What we do NOT need in Phase 1
+
+- **No Elysia/Hono** — no HTTP server in Phase 1 (CLI-only). Elysia enters in Phase 2 for event bus.
 - **No node-cron** — no scheduler in Phase 1
-- **No pg/prisma** — no database in Phase 1
 - **No Redis** — in-memory queue for Weeks 1-2, BullMQ+Redis in Week 3
+- **No Better Auth** — auth is Phase 5
+- **No Stripe** — billing is Phase 5
 
 ---
 
@@ -170,12 +181,16 @@
 ```
 src/
 ├── types.ts                 # Shared types used across all modules
+├── db/
+│   ├── schema.ts            # Drizzle schema (tasks, outputs, reviews, metrics, memory)
+│   ├── index.ts             # Database connection (bun:sqlite now, postgres later)
+│   └── seed.ts              # Seed mock product context for testing
 ├── config/
 │   ├── agents.ts            # Agent registry: 26 agents, squads, model assignment
 │   └── pipelines.ts         # 8 predefined pipeline templates
 ├── workspace/
-│   ├── manager.ts           # CRUD operations on workspace directories
-│   └── init.ts              # Create workspace dirs + seed files on first run
+│   ├── manager.ts           # CRUD operations on workspace (files + DB)
+│   └── init.ts              # Create workspace dirs + DB tables on first run
 ├── skills/
 │   └── loader.ts            # Parse SKILL.md frontmatter + body + references/
 ├── executor/
@@ -193,7 +208,15 @@ src/
 │   ├── bullmq.ts            # BullMQ adapter (Week 3) — same interface
 │   └── interface.ts         # Queue interface both implementations satisfy
 └── index.ts                 # CLI entry point
+
+drizzle/                     # Generated migrations (from drizzle-kit)
 ```
+
+### Hybrid storage model
+
+- **SQLite (via Drizzle):** Structured data — task records, execution metrics, reviews, goal plans. Queryable, typed, relational.
+- **Filesystem (workspace/):** Markdown content — agent outputs, product context, learnings. Human-readable, diffable, inspectable.
+- **Why both?** Task metadata belongs in a database (filter by status, sort by priority, aggregate metrics). Agent outputs are large markdown documents best stored as files (easy to read, diff, and version-control).
 
 ---
 
@@ -246,13 +269,24 @@ workspace/
     └── learnings.md                     # Accumulated learnings (append-only)
 ```
 
+### Storage mapping
+
+| Data | Storage | Rationale |
+|------|---------|-----------|
+| **Task records** | SQLite (Drizzle) | Queryable — filter by status, priority, agent. Joins with metrics. |
+| **Goal plans** | SQLite (Drizzle) | Structured JSON, needs querying by status. |
+| **Reviews** | SQLite (Drizzle) | Structured verdicts, needs aggregation (approval rate). |
+| **Execution metrics** | SQLite (Drizzle) | Numeric data, needs aggregation (total tokens, cost). |
+| **Agent outputs** | Filesystem (markdown) | Large text, human-readable, diffable, inspectable. |
+| **Product context** | Filesystem (markdown) | Read by agents as prompt content. Human-editable. |
+| **Learnings** | Filesystem (markdown) | Append-only text. Human-readable history. |
+
 ### Conventions
 
-- **Task files** follow the inter-agent protocol format (see Section 6).
-- **Output files** are named `{task-id}.md` inside the appropriate `outputs/{squad}/{skill}/` directory.
-- **Review files** are named `{task-id}-review.md`.
+- **Output files** are named `{task-id}.md` inside `outputs/{squad}/{skill}/`.
 - **Learnings** file is append-only. Each entry is timestamped and attributed.
 - **All workspace files are markdown** — human-readable, diffable, version-controllable.
+- **SQLite database** lives at `workspace/marketing-agents.db`. Drizzle schema in `src/db/schema.ts`.
 
 ---
 
@@ -596,7 +630,7 @@ The prompt structure:
 
 ## 9. Module: Workspace Manager
 
-**Purpose:** File system operations for the shared workspace. All agents interact with the workspace through this module — never by writing raw file paths.
+**Purpose:** Unified interface for both SQLite (structured data) and filesystem (markdown content). All modules interact with the workspace through this manager — never by writing raw paths or queries directly.
 
 **File:** `src/workspace/manager.ts`
 
@@ -607,40 +641,55 @@ export interface WorkspaceManager {
   readonly basePath: string;
 
   // Initialization
-  init(): Promise<void>;  // Create all directories + seed files
+  init(): Promise<void>;  // Create directories + DB tables + seed files
 
-  // Context
+  // Context (filesystem)
   readProductContext(): Promise<string | null>;
 
-  // Tasks
-  writeTask(task: Task): Promise<string>;          // Returns path
-  readTask(taskId: string): Promise<Task | null>;
-  updateTaskStatus(taskId: string, status: TaskStatus): Promise<void>;
-  listTasks(filter?: { status?: TaskStatus; goalId?: string }): Promise<Task[]>;
+  // Tasks (SQLite via Drizzle)
+  createTask(task: Task): Promise<Task>;
+  getTask(taskId: string): Promise<Task | null>;
+  updateTask(taskId: string, updates: Partial<Task>): Promise<void>;
+  listTasks(filter?: { status?: TaskStatus; goalId?: string; priority?: Priority }): Promise<Task[]>;
 
-  // Outputs
+  // Outputs (filesystem for content, SQLite for metadata)
   writeOutput(taskId: string, agentId: AgentId, squad: Squad, content: string): Promise<string>;
   readOutput(path: string): Promise<string | null>;
-  listOutputs(squad?: Squad, agentId?: AgentId): Promise<string[]>;
+  listOutputs(filter?: { squad?: Squad; agentId?: AgentId; goalId?: string }): Promise<string[]>;
 
-  // Reviews
-  writeReview(review: Review): Promise<string>;    // Returns path
-  readReview(taskId: string): Promise<Review | null>;
+  // Reviews (SQLite)
+  createReview(review: Review): Promise<Review>;
+  getReview(taskId: string): Promise<Review | null>;
+  listReviews(goalId: string): Promise<Review[]>;
 
-  // Memory
-  appendLearning(entry: string): Promise<void>;    // Append-only
+  // Memory (filesystem — append-only)
+  appendLearning(entry: string): Promise<void>;
   readLearnings(): Promise<string>;
 
-  // Metrics
-  writeMetrics(taskId: string, metrics: ExecutionMetrics): Promise<void>;
+  // Metrics (SQLite)
+  recordMetrics(metrics: ExecutionMetrics): Promise<void>;
+  getMetrics(filter?: { goalId?: string; agentId?: AgentId }): Promise<ExecutionMetrics[]>;
+  getMetricsSummary(goalId: string): Promise<{
+    totalTasks: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalDurationMs: number;
+    avgDurationMs: number;
+  }>;
+
+  // Goal plans (SQLite)
+  saveGoalPlan(plan: GoalPlan): Promise<void>;
+  getGoalPlan(goalId: string): Promise<GoalPlan | null>;
 }
 ```
 
 ### Implementation details
 
-- **Task files:** Written as markdown with YAML frontmatter (for human readability) + parsed as JSON internally.
-- **File locking:** For Phase 1, we rely on single-threaded execution per file. The queue ensures only one agent writes to a given output path at a time. True file locking (flock) deferred to Phase 2.
-- **Product context path:** Always `workspace/context/product-marketing-context.md`. If missing, `readProductContext()` returns `null` and agents operate without it.
+- **SQLite database:** Located at `workspace/marketing-agents.db`. Created by `init()` via Drizzle push.
+- **Drizzle schema:** Defined in `src/db/schema.ts`. Tables: `tasks`, `reviews`, `metrics`, `goal_plans`.
+- **Filesystem outputs:** Agent markdown output written to `workspace/outputs/{squad}/{skill}/{task-id}.md`. SQLite stores the metadata (path, taskId, agentId, timestamps). File content stays on disk.
+- **Concurrency:** For Phase 1, the in-memory queue serializes task execution. SQLite WAL mode enabled for read concurrency. True parallel writes deferred to PostgreSQL in Phase 2.
+- **Product context path:** Always `workspace/context/product-marketing-context.md`. If missing, `readProductContext()` returns `null`.
 
 ---
 
@@ -1224,12 +1273,20 @@ Phase 1 is designed to be extended without rewrites:
 |-----------------|-------------------|
 | **Cron scheduler** | Pipeline templates have `trigger` field ready for cron expressions |
 | **Event bus** | Pipeline engine accepts external triggers — just add an HTTP listener |
-| **PostgreSQL** | Workspace manager interface abstracts storage — add a DB-backed implementation |
+| **PostgreSQL** | Drizzle ORM abstracts the database — change import from `bun-sqlite` to `postgres` and update connection string |
 | **Monitoring** | `ExecutionMetrics` type captures all data needed — just add a reporting layer |
 | **Budget tracking** | Metrics include `inputTokens` + `outputTokens` — add cost calculation |
 | **Health checks** | Queue interface has `isPaused()` — add system-level health endpoint |
 
 The key architectural invariant: **all modules depend on interfaces, not implementations.** Swapping storage backends, queue implementations, or adding new agent types requires no changes to the pipeline engine or Director logic.
+
+### Phase 2+ additions
+
+| Feature | How it plugs in |
+|---------|----------------|
+| **Elysia HTTP server** | New `src/server.ts` entry point. Exposes webhook endpoints that call `pipeline.run()`. |
+| **Better Auth** | Elysia middleware. Auth tables added to Drizzle schema. |
+| **Stripe** | Elysia routes for webhook handling. Metering calls added to executor after each API call. |
 
 ---
 
@@ -1249,3 +1306,21 @@ LOG_LEVEL=debug                    # debug | info | warn | error
 MAX_CONCURRENCY=3                  # Max parallel agents
 DIRECTOR_MAX_ITERATIONS=3          # Max revision cycles per goal
 ```
+
+---
+
+## Appendix: Finalized Tech Stack
+
+> See [infrastructure-decisions.md](infrastructure-decisions.md) for full rationale and alternatives evaluated.
+
+| Layer | Phase 1 | Phase 2+ | Phase 5 |
+|-------|---------|----------|---------|
+| **Runtime** | Bun + TypeScript | Bun + TypeScript | Bun + TypeScript |
+| **AI SDK** | @anthropic-ai/sdk | @anthropic-ai/sdk | @anthropic-ai/sdk |
+| **Database** | SQLite (bun:sqlite) | PostgreSQL (Railway/Neon) | PostgreSQL |
+| **ORM** | Drizzle ORM | Drizzle ORM | Drizzle ORM |
+| **Queue** | In-memory → BullMQ+Redis | BullMQ + Redis | BullMQ + Redis |
+| **HTTP** | CLI only | Elysia | Elysia |
+| **Auth** | N/A | N/A | Better Auth |
+| **Billing** | N/A | N/A | Stripe |
+| **Deploy** | Local | Railway | Railway → Render/Fly.io |
