@@ -1,5 +1,3 @@
-import { mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
 import type { WorkspaceManager } from "../workspace/workspace-manager.ts";
 import type { SkillName } from "../types/agent.ts";
 import { SKILL_SQUAD_MAP, FOUNDATION_SKILL } from "../types/agent.ts";
@@ -18,8 +16,7 @@ import type {
   BudgetState,
   RoutingDecision,
 } from "./types.ts";
-import { DEFAULT_DIRECTOR_CONFIG, GOAL_CATEGORIES } from "./types.ts";
-import { PRIORITIES } from "../types/task.ts";
+import { DEFAULT_DIRECTOR_CONFIG } from "./types.ts";
 import { WorkspaceError } from "../workspace/errors.ts";
 import { DIRECTOR_SYSTEM_PROMPT } from "./system-prompt.ts";
 import { GoalDecomposer } from "./goal-decomposer.ts";
@@ -40,109 +37,6 @@ export function generateGoalId(): string {
     "",
   );
   return `goal-${dateStr}-${hex}`;
-}
-
-// ── Goal Serialization ───────────────────────────────────────────────────────
-
-function serializeGoal(goal: Goal): string {
-  const lines = [
-    "---",
-    `id: ${goal.id}`,
-    `category: ${goal.category}`,
-    `priority: ${goal.priority}`,
-    `created_at: ${goal.createdAt}`,
-    `deadline: ${goal.deadline ?? "none"}`,
-    `metadata: ${JSON.stringify(goal.metadata)}`,
-    "---",
-    "",
-    `# Goal: ${goal.id}`,
-    "",
-    "## Description",
-    "",
-    goal.description,
-    "",
-  ];
-  return lines.join("\n");
-}
-
-function deserializeGoal(markdown: string): Goal {
-  const fmMatch = markdown.match(/^---\n([\s\S]*?)\n---/);
-  if (!fmMatch) throw new Error("Invalid goal file: no frontmatter");
-
-  const fm: Record<string, string> = {};
-  for (const line of fmMatch[1]!.split("\n")) {
-    const idx = line.indexOf(":");
-    if (idx > 0) {
-      fm[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
-    }
-  }
-
-  const bodyMatch = markdown.match(/## Description\n\n([\s\S]*?)$/);
-  const description = bodyMatch ? bodyMatch[1]!.trim() : "";
-
-  let metadata: Record<string, unknown> = {};
-  try {
-    metadata = JSON.parse(fm.metadata ?? "{}");
-  } catch {
-    // ignore parse errors
-  }
-
-  if (!fm.id) throw new Error("Invalid goal file: missing id");
-  if (!fm.created_at) throw new Error("Invalid goal file: missing created_at");
-
-  const category = fm.category;
-  if (
-    !category ||
-    !(GOAL_CATEGORIES as readonly string[]).includes(category)
-  ) {
-    throw new Error(`Invalid goal file: invalid category "${category}"`);
-  }
-
-  const priority = fm.priority;
-  if (!priority || !(PRIORITIES as readonly string[]).includes(priority)) {
-    throw new Error(`Invalid goal file: invalid priority "${priority}"`);
-  }
-
-  return {
-    id: fm.id,
-    description,
-    category: category as GoalCategory,
-    priority: priority as Priority,
-    createdAt: fm.created_at,
-    deadline: fm.deadline === "none" || !fm.deadline ? null : fm.deadline,
-    metadata,
-  };
-}
-
-// ── Goal Plan Serialization ──────────────────────────────────────────────────
-
-function serializeGoalPlan(plan: GoalPlan): string {
-  const lines = [
-    "---",
-    `goal_id: ${plan.goalId}`,
-    `estimated_task_count: ${plan.estimatedTaskCount}`,
-    `pipeline_template: ${plan.pipelineTemplateName ?? "none"}`,
-    "---",
-    "",
-    `# Goal Plan: ${plan.goalId}`,
-    "",
-  ];
-
-  for (let i = 0; i < plan.phases.length; i++) {
-    const phase = plan.phases[i]!;
-    lines.push(`## Phase ${i + 1}: ${phase.name}`);
-    lines.push("");
-    lines.push(phase.description);
-    lines.push("");
-    lines.push(`- **Parallel:** ${phase.parallel}`);
-    lines.push(
-      `- **Depends on:** ${phase.dependsOnPhase !== null ? `Phase ${phase.dependsOnPhase + 1}` : "none"}`,
-    );
-    lines.push(`- **Skills:** ${phase.skills.join(", ")}`);
-    lines.push("");
-  }
-
-  return lines.join("\n");
 }
 
 // ── Marketing Director ───────────────────────────────────────────────────────
@@ -192,15 +86,7 @@ export class MarketingDirector {
       metadata: {},
     };
 
-    // Ensure goals directory exists (not part of standard workspace dirs)
-    await mkdir(resolve(this.workspace.paths.root, "goals"), {
-      recursive: true,
-    });
-
-    await this.workspace.writeFile(
-      `goals/${goal.id}.md`,
-      serializeGoal(goal),
-    );
+    await this.workspace.writeGoal(goal);
 
     return goal;
   }
@@ -209,8 +95,7 @@ export class MarketingDirector {
    * Read a goal from the workspace.
    */
   async readGoal(goalId: string): Promise<Goal> {
-    const content = await this.workspace.readFile(`goals/${goalId}.md`);
-    return deserializeGoal(content);
+    return this.workspace.readGoal(goalId);
   }
 
   /**
@@ -228,10 +113,7 @@ export class MarketingDirector {
    */
   async planGoalTasks(plan: GoalPlan, goal: Goal): Promise<readonly Task[]> {
     // Persist the plan
-    await this.workspace.writeFile(
-      `goals/${plan.goalId}-plan.md`,
-      serializeGoalPlan(plan),
-    );
+    await this.workspace.writeGoalPlan(plan);
 
     // Materialize Phase 1 tasks only
     const firstPhase = plan.phases[0];

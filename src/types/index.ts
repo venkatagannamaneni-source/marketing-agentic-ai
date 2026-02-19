@@ -52,6 +52,8 @@ export type {
   LearningEntry,
 } from "./workspace.ts";
 
+export type { GoalCategory, Goal, GoalPhase, GoalPlan } from "./goal.ts";
+
 // ── Runtime value re-exports ─────────────────────────────────────────────────
 export {
   SQUAD_NAMES,
@@ -84,3 +86,5 @@ export {
 } from "./health.ts";
 
 export { WORKSPACE_DIRS } from "./workspace.ts";
+
+export { GOAL_CATEGORIES } from "./goal.ts";

@@ -3,49 +3,16 @@ import type { Priority, Task } from "../types/task.ts";
 import type { Review } from "../types/review.ts";
 import type { LearningEntry } from "../types/workspace.ts";
 
-// ── Goal Categories ─────────────────────────────────────────────────────────
+// ── Goal Types (canonical source: src/types/goal.ts) ────────────────────────
 
-export const GOAL_CATEGORIES = [
-  "strategic",
-  "content",
-  "optimization",
-  "retention",
-  "competitive",
-  "measurement",
-] as const;
-
-export type GoalCategory = (typeof GOAL_CATEGORIES)[number];
-
-// ── Goal ─────────────────────────────────────────────────────────────────────
-
-export interface Goal {
-  readonly id: string;
-  readonly description: string;
-  readonly category: GoalCategory;
-  readonly priority: Priority;
-  readonly createdAt: string;
-  readonly deadline: string | null;
-  readonly metadata: Record<string, unknown>;
-}
-
-// ── Goal Phase ───────────────────────────────────────────────────────────────
-
-export interface GoalPhase {
-  readonly name: string;
-  readonly description: string;
-  readonly skills: readonly SkillName[];
-  readonly parallel: boolean;
-  readonly dependsOnPhase: number | null;
-}
-
-// ── Goal Plan ────────────────────────────────────────────────────────────────
-
-export interface GoalPlan {
-  readonly goalId: string;
-  readonly phases: readonly GoalPhase[];
-  readonly estimatedTaskCount: number;
-  readonly pipelineTemplateName: string | null;
-}
+export {
+  GOAL_CATEGORIES,
+  type GoalCategory,
+  type Goal,
+  type GoalPhase,
+  type GoalPlan,
+} from "../types/goal.ts";
+import type { GoalCategory } from "../types/goal.ts";
 
 // ── Squad Route ──────────────────────────────────────────────────────────────
 
