@@ -426,3 +426,211 @@ describe("serializeLearningEntry", () => {
     expect(md).not.toContain("**Goal:**");
   });
 });
+
+// ── Additional Edge Cases (from production readiness review) ────────────────
+
+describe("parseFrontmatter edge cases", () => {
+  it("does not false-match --- inside body content", () => {
+    const md = `---
+id: test-123
+---
+
+# Title
+
+Some text with --- in it
+
+More text`;
+    const result = parseFrontmatter(md);
+    expect(result.frontmatter["id"]).toBe("test-123");
+    expect(result.body).toContain("Some text with --- in it");
+  });
+
+  it("handles frontmatter with trailing whitespace on delimiters", () => {
+    const md = "---   \nid: test\n---   \n\nBody";
+    const result = parseFrontmatter(md);
+    expect(result.frontmatter["id"]).toBe("test");
+    expect(result.body).toBe("Body");
+  });
+
+  it("handles empty body after frontmatter", () => {
+    const md = "---\nid: test\n---";
+    const result = parseFrontmatter(md);
+    expect(result.frontmatter["id"]).toBe("test");
+    expect(result.body).toBe("");
+  });
+
+  it("handles frontmatter with only whitespace body", () => {
+    const md = "---\nid: test\n---\n\n   ";
+    const result = parseFrontmatter(md);
+    expect(result.frontmatter["id"]).toBe("test");
+    expect(result.body).toBe("");
+  });
+
+  it("ignores lines without colons in frontmatter", () => {
+    const md = "---\nid: test\nno-colon-here\nstatus: ok\n---\n\nBody";
+    const result = parseFrontmatter(md);
+    expect(result.frontmatter["id"]).toBe("test");
+    expect(result.frontmatter["status"]).toBe("ok");
+    expect(Object.keys(result.frontmatter)).toHaveLength(2);
+  });
+
+  it("ignores keys that are empty after trim", () => {
+    const md = "---\n: value-without-key\nid: test\n---\n\nBody";
+    const result = parseFrontmatter(md);
+    expect(result.frontmatter["id"]).toBe("test");
+    expect(result.frontmatter[""]).toBeUndefined();
+  });
+});
+
+describe("metadata round-trip", () => {
+  it("round-trips task with populated metadata", () => {
+    const task = createTestTask({
+      metadata: { campaign: "spring-2026", priority_score: 85 },
+    });
+    const md = serializeTask(task);
+    const restored = deserializeTask(md);
+    expect(restored.metadata).toEqual({
+      campaign: "spring-2026",
+      priority_score: 85,
+    });
+  });
+
+  it("round-trips task with empty metadata", () => {
+    const task = createTestTask({ metadata: {} });
+    const md = serializeTask(task);
+    const restored = deserializeTask(md);
+    expect(restored.metadata).toEqual({});
+  });
+
+  it("round-trips task with nested metadata", () => {
+    const task = createTestTask({
+      metadata: { context: { source: "review", iteration: 2 } },
+    });
+    const md = serializeTask(task);
+    const restored = deserializeTask(md);
+    expect(restored.metadata).toEqual({
+      context: { source: "review", iteration: 2 },
+    });
+  });
+
+  it("serializes metadata as JSON in frontmatter", () => {
+    const task = createTestTask({ metadata: { key: "value" } });
+    const md = serializeTask(task);
+    const { frontmatter } = parseFrontmatter(md);
+    expect(frontmatter["metadata"]).toBe('{"key":"value"}');
+  });
+});
+
+describe("deserializeTask validation edge cases", () => {
+  it("throws on invalid from value", () => {
+    const task = createTestTask();
+    const md = serializeTask(task).replace("from: director", "from: unknown");
+    expect(() => deserializeTask(md)).toThrow(WorkspaceError);
+  });
+
+  it("throws on invalid to value", () => {
+    const task = createTestTask();
+    const md = serializeTask(task).replace("to: copywriting", "to: bad-skill");
+    expect(() => deserializeTask(md)).toThrow(WorkspaceError);
+  });
+
+  it("throws on invalid next_type", () => {
+    const task = createTestTask();
+    const md = serializeTask(task).replace(
+      "next_type: director_review",
+      "next_type: invalid_type",
+    );
+    expect(() => deserializeTask(md)).toThrow(WorkspaceError);
+  });
+
+  it("throws on agent next_type with missing next_skill", () => {
+    const task = createTestTask({ next: { type: "agent", skill: "copywriting" } });
+    let md = serializeTask(task);
+    // Remove the next_skill line
+    md = md.replace(/next_skill: .+\n/, "");
+    expect(() => deserializeTask(md)).toThrow(WorkspaceError);
+  });
+
+  it("throws on agent next_type with invalid next_skill", () => {
+    const task = createTestTask({ next: { type: "agent", skill: "copywriting" } });
+    const md = serializeTask(task).replace(
+      "next_skill: copywriting",
+      "next_skill: nonexistent",
+    );
+    expect(() => deserializeTask(md)).toThrow(WorkspaceError);
+  });
+
+  it("throws on pipeline_continue next_type with missing next_pipeline", () => {
+    const task = createTestTask({
+      next: { type: "pipeline_continue", pipelineId: "pipe-1" },
+    });
+    let md = serializeTask(task);
+    md = md.replace(/next_pipeline: .+\n/, "");
+    expect(() => deserializeTask(md)).toThrow(WorkspaceError);
+  });
+
+  it("throws on negative revision_count", () => {
+    const task = createTestTask();
+    const md = serializeTask(task).replace(
+      "revision_count: 0",
+      "revision_count: -1",
+    );
+    expect(() => deserializeTask(md)).toThrow(WorkspaceError);
+  });
+
+  it("throws on non-numeric revision_count", () => {
+    const task = createTestTask();
+    const md = serializeTask(task).replace(
+      "revision_count: 0",
+      "revision_count: abc",
+    );
+    expect(() => deserializeTask(md)).toThrow(WorkspaceError);
+  });
+
+  it("handles metadata with colons in values (JSON)", () => {
+    const task = createTestTask({
+      metadata: { url: "https://example.com:8080/path" },
+    });
+    const md = serializeTask(task);
+    const restored = deserializeTask(md);
+    expect(restored.metadata).toEqual({
+      url: "https://example.com:8080/path",
+    });
+  });
+});
+
+describe("deserializeReview validation edge cases", () => {
+  it("throws on invalid reviewer", () => {
+    const review = createTestReview();
+    const md = serializeReview(review).replace(
+      "reviewer: director",
+      "reviewer: unknown-person",
+    );
+    expect(() => deserializeReview(md)).toThrow(WorkspaceError);
+  });
+
+  it("throws on invalid author", () => {
+    const review = createTestReview();
+    const md = serializeReview(review).replace(
+      "author: copywriting",
+      "author: not-a-skill",
+    );
+    expect(() => deserializeReview(md)).toThrow(WorkspaceError);
+  });
+
+  it("throws on invalid verdict", () => {
+    const review = createTestReview();
+    const md = serializeReview(review).replace(
+      "verdict: REVISE",
+      "verdict: MAYBE",
+    );
+    expect(() => deserializeReview(md)).toThrow(WorkspaceError);
+  });
+
+  it("accepts skill name as reviewer", () => {
+    const review = { ...createTestReview(), reviewer: "copy-editing" as const };
+    const md = serializeReview(review);
+    const restored = deserializeReview(md);
+    expect(restored.reviewer).toBe("copy-editing");
+  });
+});

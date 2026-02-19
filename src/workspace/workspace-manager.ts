@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile, readdir, unlink, stat, appendFile } from "node:fs/promises";
-import { resolve, relative } from "node:path";
+import { mkdir, readFile, writeFile, readdir, unlink, stat } from "node:fs/promises";
+import { resolve, relative, dirname } from "node:path";
 import type { WorkspaceConfig, WorkspacePaths, LearningEntry } from "../types/workspace.ts";
 import type { Task, TaskStatus, TaskFilter } from "../types/task.ts";
 import type { Review } from "../types/review.ts";
@@ -159,8 +159,7 @@ export class FileSystemWorkspaceManager implements WorkspaceManager {
     const lock = await acquireLock(absPath);
     try {
       // Ensure parent directory exists
-      const parentDir = absPath.slice(0, absPath.lastIndexOf("/"));
-      await mkdir(parentDir, { recursive: true });
+      await mkdir(dirname(absPath), { recursive: true });
       await writeFile(absPath, content, "utf-8");
     } catch (err: unknown) {
       if (err instanceof WorkspaceError) throw err;
@@ -330,17 +329,16 @@ export class FileSystemWorkspaceManager implements WorkspaceManager {
     const absPath = this.resolveSafe("memory/learnings.md");
     const lock = await acquireLock(absPath);
     try {
-      const content = serializeLearningEntry(entry);
-      const exists = await this.fileExists("memory/learnings.md");
-      if (!exists) {
-        await writeFile(
-          absPath,
-          `# Learnings\n\n${content}`,
-          "utf-8",
-        );
-      } else {
-        await appendFile(absPath, content, "utf-8");
+      const newContent = serializeLearningEntry(entry);
+      // Read-then-write within the lock to avoid TOCTOU race conditions
+      let existing = "";
+      try {
+        existing = await readFile(absPath, "utf-8");
+      } catch {
+        // File doesn't exist yet — start with header
+        existing = "# Learnings\n\n";
       }
+      await writeFile(absPath, existing + newContent, "utf-8");
     } finally {
       await lock.release();
     }
@@ -373,8 +371,9 @@ export class FileSystemWorkspaceManager implements WorkspaceManager {
     const absPath = resolve(this.rootDir, relativePath);
     const rel = relative(this.rootDir, absPath);
 
-    // Prevent path traversal: resolved path must be within rootDir
-    if (rel.startsWith("..") || resolve(absPath) !== absPath.replace(/\/+$/, "")) {
+    // Prevent path traversal: resolved path must be within rootDir.
+    // relative() returns a path starting with ".." if absPath is outside rootDir.
+    if (rel.startsWith("..") || rel === "") {
       throw new WorkspaceError(
         `Path traversal detected: ${relativePath}`,
         "INVALID_PATH",

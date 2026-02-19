@@ -36,8 +36,11 @@ export async function acquireLock(
         async release() {
           try {
             await rmdir(lockPath);
-          } catch {
-            // Lock dir already removed — not an error
+          } catch (err: unknown) {
+            // ENOENT is expected if lock was already cleaned up
+            if (isErrnoException(err) && err.code === "ENOENT") return;
+            // Other errors — log warning but don't throw
+            // (avoids masking errors in finally blocks)
           }
         },
       };

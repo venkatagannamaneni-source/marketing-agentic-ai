@@ -33,6 +33,9 @@ export function validateTask(task: unknown): asserts task is Task {
   assertOneOf(t, "priority", PRIORITIES as readonly string[]);
   assertOneOf(t, "status", TASK_STATUSES as readonly string[]);
   assertNumber(t, "revisionCount");
+  if ((t["revisionCount"] as number) < 0) {
+    throw validationError(`"revisionCount" must be non-negative`);
+  }
   assertString(t, "goal");
   assertString(t, "requirements");
 
@@ -81,11 +84,18 @@ function validateTaskNext(next: Record<string, unknown>): void {
   assertOneOf(next, "type", VALID_NEXT_TYPES);
   const nextType = next["type"] as string;
 
-  if (nextType === "agent") {
-    assertOneOf(next, "skill", SKILL_NAMES as readonly string[]);
-  }
-  if (nextType === "pipeline_continue") {
-    assertString(next, "pipelineId");
+  switch (nextType) {
+    case "agent":
+      assertOneOf(next, "skill", SKILL_NAMES as readonly string[]);
+      break;
+    case "pipeline_continue":
+      assertString(next, "pipelineId");
+      break;
+    case "director_review":
+    case "complete":
+      break;
+    default:
+      throw validationError(`Unknown next type: "${nextType}"`);
   }
 }
 

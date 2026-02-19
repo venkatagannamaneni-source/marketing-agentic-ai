@@ -13,6 +13,13 @@ import { REVIEW_VERDICTS } from "../types/review.ts";
 import { SKILL_NAMES } from "../types/agent.ts";
 import { WorkspaceError } from "./errors.ts";
 
+const VALID_FROM_VALUES: readonly string[] = [
+  ...SKILL_NAMES,
+  "director",
+  "scheduler",
+  "event-bus",
+];
+
 // ── Frontmatter Parser ───────────────────────────────────────────────────────
 
 export interface ParsedMarkdown {
@@ -27,20 +34,25 @@ export interface ParsedMarkdown {
  */
 export function parseFrontmatter(markdown: string): ParsedMarkdown {
   const trimmed = markdown.trim();
-  if (!trimmed.startsWith("---")) {
+
+  // Frontmatter delimiters must be --- on their own line (with optional trailing whitespace).
+  // This prevents false matches on --- appearing inside body content.
+  const fmPattern = /^---[ \t]*\n([\s\S]*?\n)?---[ \t]*(?:\n([\s\S]*))?$/;
+  const match = trimmed.match(fmPattern);
+
+  if (!match) {
+    // Detect malformed frontmatter: starts with --- but no valid closing ---
+    if (/^---[ \t]*\n/.test(trimmed) && !/\n---[ \t]*(\n|$)/.test(trimmed)) {
+      throw new WorkspaceError(
+        "Malformed frontmatter: missing closing ---",
+        "PARSE_ERROR",
+      );
+    }
     return { frontmatter: {}, body: trimmed };
   }
 
-  const secondDash = trimmed.indexOf("---", 3);
-  if (secondDash === -1) {
-    throw new WorkspaceError(
-      "Malformed frontmatter: missing closing ---",
-      "PARSE_ERROR",
-    );
-  }
-
-  const frontmatterStr = trimmed.slice(3, secondDash).trim();
-  const body = trimmed.slice(secondDash + 3).trim();
+  const frontmatterStr = (match[1] ?? "").trim();
+  const body = (match[2] ?? "").trim();
 
   const frontmatter: Record<string, string> = {};
   for (const line of frontmatterStr.split("\n")) {
@@ -79,6 +91,9 @@ export function serializeTask(task: Task): string {
   if (task.next.type === "pipeline_continue")
     lines.push(`next_pipeline: ${task.next.pipelineId}`);
   if (task.tags.length > 0) lines.push(`tags: ${task.tags.join(", ")}`);
+  if (Object.keys(task.metadata).length > 0) {
+    lines.push(`metadata: ${JSON.stringify(task.metadata)}`);
+  }
   lines.push("---");
   lines.push("");
 
@@ -130,14 +145,21 @@ export function deserializeTask(markdown: string): Task {
   const id = requireField(fm, "id");
   const status = requireEnum(fm, "status", TASK_STATUSES);
   const priority = requireEnum(fm, "priority", PRIORITIES);
-  const from = requireField(fm, "from") as TaskFrom;
+  const from = requireEnum(fm, "from", VALID_FROM_VALUES) as TaskFrom;
   const to = requireEnum(fm, "to", SKILL_NAMES);
   const createdAt = requireField(fm, "created_at");
   const updatedAt = requireField(fm, "updated_at");
   const deadline = fm["deadline"] ?? null;
   const goalId = fm["goal_id"] ?? null;
   const pipelineId = fm["pipeline_id"] ?? null;
-  const revisionCount = parseInt(requireField(fm, "revision_count"), 10);
+  const revisionCountStr = requireField(fm, "revision_count");
+  const revisionCount = parseInt(revisionCountStr, 10);
+  if (Number.isNaN(revisionCount) || revisionCount < 0) {
+    throw new WorkspaceError(
+      `Invalid revision_count: "${revisionCountStr}"`,
+      "PARSE_ERROR",
+    );
+  }
   const outputPath = requireField(fm, "output_path");
   const outputFormat = requireField(fm, "output_format");
   const nextType = requireField(fm, "next_type");
@@ -166,7 +188,7 @@ export function deserializeTask(markdown: string): Task {
     output: { path: outputPath, format: outputFormat },
     next,
     tags,
-    metadata: {},
+    metadata: parseMetadata(fm["metadata"]),
   };
 }
 
@@ -227,7 +249,17 @@ export function deserializeReview(markdown: string): Review {
   const id = requireField(fm, "id");
   const taskId = requireField(fm, "task_id");
   const createdAt = requireField(fm, "created_at");
-  const reviewer = requireField(fm, "reviewer") as SkillName | "director";
+  const reviewerStr = requireField(fm, "reviewer");
+  if (
+    reviewerStr !== "director" &&
+    !(SKILL_NAMES as readonly string[]).includes(reviewerStr)
+  ) {
+    throw new WorkspaceError(
+      `Invalid reviewer: "${reviewerStr}"`,
+      "PARSE_ERROR",
+    );
+  }
+  const reviewer = reviewerStr as SkillName | "director";
   const author = requireEnum(fm, "author", SKILL_NAMES);
   const verdict = requireEnum(fm, "verdict", REVIEW_VERDICTS);
 
@@ -264,6 +296,21 @@ export function serializeLearningEntry(entry: LearningEntry): string {
 }
 
 // ── Internal Helpers ─────────────────────────────────────────────────────────
+
+function parseMetadata(
+  raw: string | undefined,
+): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
 
 function requireField(
   fm: Record<string, string>,
@@ -304,6 +351,12 @@ function parseNext(
       if (!skill) {
         throw new WorkspaceError(
           "Missing next_skill for agent next type",
+          "PARSE_ERROR",
+        );
+      }
+      if (!(SKILL_NAMES as readonly string[]).includes(skill)) {
+        throw new WorkspaceError(
+          `Invalid next_skill: "${skill}"`,
           "PARSE_ERROR",
         );
       }

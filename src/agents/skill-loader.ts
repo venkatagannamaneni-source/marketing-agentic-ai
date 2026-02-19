@@ -41,15 +41,18 @@ export async function loadSkillMeta(
 
   const { frontmatter } = parseFrontmatter(content);
 
-  const name = (frontmatter["name"] as string | undefined) ?? skillName;
+  const rawName = (frontmatter["name"] as string | undefined) ?? skillName;
+  // Validate that parsed name is a known skill (prevents type system bypass)
+  const name: SkillName = (SKILL_NAMES as readonly string[]).includes(rawName)
+    ? (rawName as SkillName)
+    : skillName; // Fall back to the known skillName if frontmatter has unexpected value
   const description = (frontmatter["description"] as string | undefined) ?? "";
-  // Version may be nested under metadata in some SKILL.md files
   const version = extractVersion(frontmatter);
 
   const referenceFiles = await discoverReferenceFiles(skillDir);
 
   return {
-    name: name as SkillName,
+    name,
     description: stripQuotes(description),
     version,
     squad: SKILL_SQUAD_MAP[skillName] ?? null,
