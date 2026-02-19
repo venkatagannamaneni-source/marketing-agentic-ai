@@ -17,7 +17,9 @@ import type {
   BudgetState,
   RoutingDecision,
 } from "./types.ts";
-import { DEFAULT_DIRECTOR_CONFIG } from "./types.ts";
+import { DEFAULT_DIRECTOR_CONFIG, GOAL_CATEGORIES } from "./types.ts";
+import { PRIORITIES } from "../types/task.ts";
+import { WorkspaceError } from "../workspace/errors.ts";
 import { DIRECTOR_SYSTEM_PROMPT } from "./system-prompt.ts";
 import { GoalDecomposer } from "./goal-decomposer.ts";
 import { PipelineFactory } from "./pipeline-factory.ts";
@@ -81,13 +83,29 @@ function deserializeGoal(markdown: string): Goal {
     // ignore parse errors
   }
 
+  if (!fm.id) throw new Error("Invalid goal file: missing id");
+  if (!fm.created_at) throw new Error("Invalid goal file: missing created_at");
+
+  const category = fm.category;
+  if (
+    !category ||
+    !(GOAL_CATEGORIES as readonly string[]).includes(category)
+  ) {
+    throw new Error(`Invalid goal file: invalid category "${category}"`);
+  }
+
+  const priority = fm.priority;
+  if (!priority || !(PRIORITIES as readonly string[]).includes(priority)) {
+    throw new Error(`Invalid goal file: invalid priority "${priority}"`);
+  }
+
   return {
-    id: fm.id!,
+    id: fm.id,
     description,
-    category: fm.category as GoalCategory,
-    priority: fm.priority as Priority,
-    createdAt: fm.created_at!,
-    deadline: fm.deadline === "none" ? null : fm.deadline!,
+    category: category as GoalCategory,
+    priority: priority as Priority,
+    createdAt: fm.created_at,
+    deadline: fm.deadline === "none" || !fm.deadline ? null : fm.deadline,
     metadata,
   };
 }
@@ -281,17 +299,16 @@ export class MarketingDirector {
           taskId,
         );
       }
-    } catch {
-      // Output doesn't exist — will be flagged as empty
+    } catch (err: unknown) {
+      if (err instanceof WorkspaceError && err.code === "NOT_FOUND") {
+        // Output doesn't exist yet — will be flagged as empty by review engine
+      } else {
+        throw err;
+      }
     }
 
-    // Get existing reviews for this task
-    let existingReviews: Review[] = [];
-    try {
-      existingReviews = await this.workspace.listReviews(taskId);
-    } catch {
-      existingReviews = [];
-    }
+    // Get existing reviews for this task (listReviews returns [] if none exist)
+    const existingReviews = await this.workspace.listReviews(taskId);
 
     // Evaluate
     const decision = this.reviewEngine.evaluateTask(
@@ -347,7 +364,10 @@ export class MarketingDirector {
     const goal = await this.readGoal(goalId);
 
     // Read all tasks for this goal
-    const allTasks = await this.workspace.listTasks({ status: undefined });
+    // Note: TaskFilter doesn't support goalId yet, so we read all and filter.
+    // This is acceptable for now; a goalId filter can be added to TaskFilter
+    // when workspace performance matters at scale.
+    const allTasks = await this.workspace.listTasks();
     const goalTasks = allTasks.filter((t) => t.goalId === goalId);
 
     // Check if all current tasks are approved
@@ -366,21 +386,36 @@ export class MarketingDirector {
     // All done — decompose to find the plan again and check for next phase
     const plan = this.decomposeGoal(goal);
 
-    // Determine which phase we just completed based on completed tasks
-    const completedSkills = new Set(
-      goalTasks
-        .filter((t) => t.status === "approved")
-        .map((t) => t.to),
-    );
+    // Count approved tasks per skill to handle skills that appear in multiple phases.
+    // We track how many approved tasks exist for each skill, then consume them
+    // phase-by-phase to determine which phase is next.
+    const approvedCountBySkill = new Map<string, number>();
+    for (const t of goalTasks) {
+      if (t.status === "approved") {
+        approvedCountBySkill.set(
+          t.to,
+          (approvedCountBySkill.get(t.to) ?? 0) + 1,
+        );
+      }
+    }
 
-    // Find the first phase with un-completed skills
+    // Find the first phase with insufficient approved tasks
+    const consumedBySkill = new Map<string, number>();
     let nextPhaseIndex = -1;
     for (let i = 0; i < plan.phases.length; i++) {
       const phase = plan.phases[i]!;
-      const allComplete = phase.skills.every((s) => completedSkills.has(s));
+      const allComplete = phase.skills.every((s) => {
+        const consumed = consumedBySkill.get(s) ?? 0;
+        const approved = approvedCountBySkill.get(s) ?? 0;
+        return approved > consumed;
+      });
       if (!allComplete) {
         nextPhaseIndex = i;
         break;
+      }
+      // Mark skills as consumed for this phase
+      for (const s of phase.skills) {
+        consumedBySkill.set(s, (consumedBySkill.get(s) ?? 0) + 1);
       }
     }
 
