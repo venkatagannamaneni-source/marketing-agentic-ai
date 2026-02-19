@@ -1,0 +1,16 @@
+{
+  "name": "marketing-agentic-ai",
+  "module": "index.ts",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@playwright/test": "1.56.1",
+    "playwright": "1.56.1"
+  }
+}
