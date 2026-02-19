@@ -92,6 +92,30 @@ export {
   loadAllSkills,
 } from "./agents/index.ts";
 
+// ── Executor ─────────────────────────────────────────────────────────────────
+export {
+  AgentExecutor,
+  AnthropicClaudeClient,
+  MockClaudeClient,
+  loadSkillContent,
+  buildPrompt,
+  cancellableSleep,
+  ExecutionError,
+  DEFAULT_MODEL_MAP,
+  createDefaultConfig,
+  type ClaudeClient,
+  type ClaudeClientConfig,
+  type ClaudeRequest,
+  type ClaudeResponse,
+  type ExecutionResult,
+  type ExecutionStatus,
+  type ExecutorConfig,
+  type ExecutionErrorCode,
+  type SkillContent,
+  type BuildPromptParams,
+  type UpstreamOutput,
+} from "./executor/index.ts";
+
 // ── Director ─────────────────────────────────────────────────────────────────
 export type {
   GoalCategory,
