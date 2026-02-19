@@ -81,7 +81,7 @@ export {
   createWorkspacePaths,
 } from "./workspace/index.ts";
 
-// ── Agents ────────────────────────────────────────────────────────────────────
+// ── Agents (Task 7 — new modular agent system) ──────────────────────────────
 export {
   AGENT_DEPENDENCY_GRAPH,
   getUpstreamSkills,
@@ -90,12 +90,34 @@ export {
   PIPELINE_TEMPLATES,
   loadSkillMeta,
   loadAllSkills,
+  // Claude Client (new)
+  type ClaudeClient as AgentClaudeClient,
+  type ClaudeMessageParams,
+  type ClaudeMessage,
+  type ClaudeMessageResult,
+  type ExecutionErrorCode as AgentExecutionErrorCode,
+  ExecutionError as AgentExecutionError,
+  MODEL_MAP,
+  COST_PER_MILLION_TOKENS,
+  estimateCost,
+  AnthropicClaudeClient,
+  // Model Selector
+  selectModelTier,
+  // Prompt Builder
+  type BuiltPrompt,
+  buildAgentPrompt,
+  // Agent Executor (new)
+  type ExecutorConfig as AgentExecutorConfig,
+  type ExecutionResult as AgentExecutionResult,
+  type ExecutionMetadata,
+  AgentExecutor as ModularAgentExecutor,
+  DEFAULT_EXECUTOR_CONFIG,
 } from "./agents/index.ts";
 
-// ── Executor ─────────────────────────────────────────────────────────────────
+// ── Executor (Tasks 1-6 — used by pipeline and queue) ──────────────────────
 export {
   AgentExecutor,
-  AnthropicClaudeClient,
+  AnthropicClaudeClient as LegacyAnthropicClaudeClient,
   MockClaudeClient,
   loadSkillContent,
   buildPrompt,
@@ -131,6 +153,7 @@ export type {
   BudgetLevel,
   BudgetState,
   DirectorConfig,
+  SemanticReviewResult,
 } from "./director/index.ts";
 
 export {

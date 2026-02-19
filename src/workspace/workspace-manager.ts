@@ -244,13 +244,39 @@ export class FileSystemWorkspaceManager implements WorkspaceManager {
   }
 
   async updateTaskStatus(taskId: string, status: TaskStatus): Promise<void> {
-    const task = await this.readTask(taskId);
-    const updated: Task = {
-      ...task,
-      status,
-      updatedAt: new Date().toISOString(),
-    };
-    await this.writeTask(updated);
+    // Atomic read-then-write under a single lock to prevent TOCTOU races.
+    // We inline the read+write instead of calling readTask/writeTask to avoid
+    // double-locking (writeFile also acquires a lock internally).
+    const absPath = this.resolveSafe(`tasks/${taskId}.md`);
+    const lock = await acquireLock(absPath);
+    try {
+      let content: string;
+      try {
+        content = await readFile(absPath, "utf-8");
+      } catch (err: unknown) {
+        if (isErrnoException(err) && err.code === "ENOENT") {
+          throw new WorkspaceError(
+            `File not found: tasks/${taskId}.md`,
+            "NOT_FOUND",
+            `tasks/${taskId}.md`,
+          );
+        }
+        throw new WorkspaceError(
+          `Failed to read: tasks/${taskId}.md`,
+          "READ_FAILED",
+          `tasks/${taskId}.md`,
+        );
+      }
+      const task = deserializeTask(content);
+      const updated: Task = {
+        ...task,
+        status,
+        updatedAt: new Date().toISOString(),
+      };
+      await writeFile(absPath, serializeTask(updated), "utf-8");
+    } finally {
+      await lock.release();
+    }
   }
 
   // ── Review Operations ───────────────────────────────────────────────────
