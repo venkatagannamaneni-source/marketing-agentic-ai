@@ -161,3 +161,47 @@ export {
   type PipelineResult,
   type PipelineErrorCode,
 } from "./pipeline/index.ts";
+
+// ── Queue ────────────────────────────────────────────────────────────────────
+export type {
+  RedisConfig,
+  TaskQueueConfig,
+  QueueRetryConfig,
+  QueueJobData,
+  QueueJobResult,
+  RoutingAction,
+  DeadLetterEntry,
+  QueueHealth,
+  QueueAddOptions,
+  QueueAdapter,
+  FailedJob,
+  WorkerAdapter,
+  JobHandle,
+  ProcessorFn,
+  BudgetDecision,
+  WorkerProcessorDeps,
+  TaskQueueManagerDeps,
+  EnqueueResult,
+  RedisClient,
+  RedisConnectionManager,
+} from "./queue/index.ts";
+
+export {
+  DEFAULT_REDIS_CONFIG,
+  DEFAULT_QUEUE_RETRY,
+  DEFAULT_TASK_QUEUE_CONFIG,
+  BudgetDeferralError,
+  CascadePauseError,
+  TaskExecutionError,
+  PRIORITY_MAP,
+  taskPriorityToQueuePriority,
+  queuePriorityToTaskPriority,
+  BudgetGate,
+  FailureTracker,
+  FallbackQueue,
+  createRedisConnection,
+  createRedisConnectionFromClient,
+  CompletionRouter,
+  createWorkerProcessor,
+  TaskQueueManager,
+} from "./queue/index.ts";
