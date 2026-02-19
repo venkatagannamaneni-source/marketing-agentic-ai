@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile, readdir, unlink, stat } from "node:fs/promi
 import { resolve, relative, dirname } from "node:path";
 import type { WorkspaceConfig, WorkspacePaths, LearningEntry } from "../types/workspace.ts";
 import type { Task, TaskStatus, TaskFilter } from "../types/task.ts";
+import { validateTransition } from "../types/task.ts";
 import type { Review } from "../types/review.ts";
 import type { SkillName, SquadName } from "../types/agent.ts";
 import { SKILL_NAMES, SKILL_SQUAD_MAP, SQUAD_NAMES } from "../types/agent.ts";
@@ -268,6 +269,7 @@ export class FileSystemWorkspaceManager implements WorkspaceManager {
         );
       }
       const task = deserializeTask(content);
+      validateTransition(taskId, task.status, status);
       const updated: Task = {
         ...task,
         status,

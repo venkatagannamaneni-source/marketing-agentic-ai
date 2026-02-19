@@ -51,6 +51,7 @@ describe("E2E: Director Review", () => {
     );
 
     // Mark task as completed (review expects completed status)
+    await ctx.workspace.updateTaskStatus(task.id, "in_progress");
     await ctx.workspace.updateTaskStatus(task.id, "completed");
 
     // Review
@@ -93,6 +94,7 @@ describe("E2E: Director Review", () => {
       task.id,
       "Short output that is clearly insufficient for a real marketing deliverable.",
     );
+    await ctx.workspace.updateTaskStatus(task.id, "in_progress");
     await ctx.workspace.updateTaskStatus(task.id, "completed");
 
     const decision = await ctx.director.reviewCompletedTask(task.id);
@@ -125,6 +127,7 @@ describe("E2E: Director Review", () => {
     // Write empty output → critical finding → REJECT
     const squad = SKILL_SQUAD_MAP[task.to]!;
     await ctx.workspace.writeOutput(squad, task.to, task.id, "");
+    await ctx.workspace.updateTaskStatus(task.id, "in_progress");
     await ctx.workspace.updateTaskStatus(task.id, "completed");
 
     const decision = await ctx.director.reviewCompletedTask(task.id);
@@ -170,6 +173,7 @@ describe("E2E: Director Review", () => {
       revisedTaskId,
       "Short output that needs more work but has been revised too many times.",
     );
+    await ctx.workspace.updateTaskStatus(revisedTaskId, "in_progress");
     await ctx.workspace.updateTaskStatus(revisedTaskId, "completed");
 
     const decision = await ctx.director.reviewCompletedTask(revisedTaskId);

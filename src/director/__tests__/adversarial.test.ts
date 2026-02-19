@@ -183,8 +183,10 @@ describe("ADVERSARIAL: advanceGoal phase tracking", () => {
     const plan = director.decomposeGoal(goal);
     const phase1Tasks = await director.planGoalTasks(plan, goal);
 
-    // Approve all phase 1 tasks
+    // Approve all phase 1 tasks (follow valid state machine transitions)
     for (const task of phase1Tasks) {
+      await tw.workspace.updateTaskStatus(task.id, "in_progress");
+      await tw.workspace.updateTaskStatus(task.id, "completed");
       await tw.workspace.updateTaskStatus(task.id, "approved");
     }
 
@@ -201,8 +203,10 @@ describe("ADVERSARIAL: advanceGoal phase tracking", () => {
     const plan = director.decomposeGoal(goal);
     const tasks = await director.planGoalTasks(plan, goal);
 
-    // Approve all tasks
+    // Approve all tasks (follow valid state machine transitions)
     for (const task of tasks) {
+      await tw.workspace.updateTaskStatus(task.id, "in_progress");
+      await tw.workspace.updateTaskStatus(task.id, "completed");
       await tw.workspace.updateTaskStatus(task.id, "approved");
     }
 

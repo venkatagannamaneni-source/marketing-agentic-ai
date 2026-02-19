@@ -61,7 +61,14 @@ export {
   getSquadSkills,
 } from "./agent.ts";
 
-export { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES } from "./task.ts";
+export {
+  PRIORITIES,
+  PRIORITY_LABELS,
+  TASK_STATUSES,
+  VALID_TRANSITIONS,
+  validateTransition,
+  InvalidTransitionError,
+} from "./task.ts";
 
 export { REVIEW_VERDICTS } from "./review.ts";
 

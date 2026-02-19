@@ -30,6 +30,46 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+// ── Task State Machine ──────────────────────────────────────────────────────
+
+export const VALID_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
+  pending: ["in_progress", "assigned", "blocked", "deferred", "cancelled", "failed"],
+  assigned: ["in_progress", "cancelled", "failed"],
+  in_progress: ["completed", "failed", "cancelled"],
+  completed: ["approved", "revision", "failed", "blocked", "in_review"],
+  in_review: ["approved", "revision", "failed", "blocked"],
+  revision: ["in_progress", "cancelled", "failed"],
+  approved: [],
+  failed: [],
+  blocked: ["pending", "failed"],
+  deferred: ["pending", "failed"],
+  cancelled: [],
+} as const;
+
+export class InvalidTransitionError extends Error {
+  override readonly name = "InvalidTransitionError";
+  constructor(
+    public readonly taskId: string,
+    public readonly from: TaskStatus,
+    public readonly to: TaskStatus,
+  ) {
+    super(
+      `Invalid status transition for task ${taskId}: "${from}" -> "${to}"`,
+    );
+  }
+}
+
+export function validateTransition(
+  taskId: string,
+  from: TaskStatus,
+  to: TaskStatus,
+): void {
+  const allowed = VALID_TRANSITIONS[from];
+  if (!allowed.includes(to)) {
+    throw new InvalidTransitionError(taskId, from, to);
+  }
+}
+
 // ── Task Structure ───────────────────────────────────────────────────────────
 
 export interface TaskInput {

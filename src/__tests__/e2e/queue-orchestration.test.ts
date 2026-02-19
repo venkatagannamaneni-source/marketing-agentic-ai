@@ -160,6 +160,8 @@ describe("E2E: Queue Orchestration", () => {
       task.id,
       generateMockOutput(task.to, task.id),
     );
+    await ctx.workspace.updateTaskStatus(task.id, "in_progress");
+    await ctx.workspace.updateTaskStatus(task.id, "completed");
     await ctx.workspace.updateTaskStatus(task.id, "approved");
 
     // Route the completed task
