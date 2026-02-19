@@ -91,3 +91,39 @@ export {
   loadSkillMeta,
   loadAllSkills,
 } from "./agents/index.ts";
+
+// ── Director ─────────────────────────────────────────────────────────────────
+export type {
+  GoalCategory,
+  Goal,
+  GoalPhase,
+  GoalPlan,
+  SquadRoute,
+  RoutingDecision,
+  DirectorAction,
+  DirectorDecision,
+  EscalationReason,
+  Escalation,
+  BudgetLevel,
+  BudgetState,
+  DirectorConfig,
+} from "./director/index.ts";
+
+export {
+  GOAL_CATEGORIES,
+  DIRECTOR_ACTIONS,
+  ESCALATION_REASONS,
+  BUDGET_LEVELS,
+  DEFAULT_DIRECTOR_CONFIG,
+  DIRECTOR_SYSTEM_PROMPT,
+  routeGoal,
+  selectSkills,
+  ROUTING_RULES,
+  GoalDecomposer,
+  GOAL_CATEGORY_TEMPLATE_MAP,
+  PipelineFactory,
+  ReviewEngine,
+  EscalationEngine,
+  MarketingDirector,
+  generateGoalId,
+} from "./director/index.ts";
