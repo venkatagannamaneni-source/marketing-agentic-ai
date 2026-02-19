@@ -151,3 +151,13 @@ export {
   MarketingDirector,
   generateGoalId,
 } from "./director/index.ts";
+
+// ── Pipeline Engine ──────────────────────────────────────────────────────────
+export {
+  SequentialPipelineEngine,
+  PipelineError,
+  type PipelineEngineConfig,
+  type StepResult,
+  type PipelineResult,
+  type PipelineErrorCode,
+} from "./pipeline/index.ts";
