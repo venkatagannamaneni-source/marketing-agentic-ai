@@ -13,6 +13,7 @@ export interface ClaudeMessageParams {
   readonly messages: readonly ClaudeMessage[];
   readonly maxTokens: number;
   readonly timeoutMs: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface ClaudeMessage {
@@ -37,7 +38,13 @@ export type ExecutionErrorCode =
   | "TIMEOUT"
   | "TRUNCATED"
   | "MALFORMED_OUTPUT"
-  | "BUDGET_EXHAUSTED";
+  | "BUDGET_EXHAUSTED"
+  | "TASK_NOT_EXECUTABLE"
+  | "ABORTED"
+  | "SKILL_NOT_FOUND"
+  | "RESPONSE_EMPTY"
+  | "WORKSPACE_WRITE_FAILED"
+  | "UNKNOWN";
 
 export class ExecutionError extends Error {
   override readonly name = "ExecutionError";
@@ -143,7 +150,10 @@ export class AnthropicClaudeClient implements ClaudeClient {
             })),
             max_tokens: params.maxTokens,
           },
-          { timeout: params.timeoutMs },
+          {
+            timeout: params.timeoutMs,
+            ...(params.signal ? { signal: params.signal } : {}),
+          },
         );
       } catch (err: unknown) {
         const classified = classifyError(err);

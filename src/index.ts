@@ -119,6 +119,9 @@ export {
   type ExecutionMetadata,
   AgentExecutor as ModularAgentExecutor,
   DEFAULT_EXECUTOR_CONFIG,
+  // Client Adapters
+  ModernToLegacyClientAdapter,
+  LegacyToModernClientAdapter,
 } from "./agents/index.ts";
 
 // ── Executor (Tasks 1-6 — used by pipeline and queue) ──────────────────────

@@ -22,6 +22,13 @@ const EXECUTABLE_STATUSES = new Set(["pending", "assigned", "revision"]);
 
 // ── Agent Executor ──────────────────────────────────────────────────────────
 
+/**
+ * @deprecated Use `AgentExecutor` from `src/agents/executor.ts` (exported as
+ * `ModularAgentExecutor` from the package root) instead. This class is
+ * maintained for backward compatibility with the pipeline and queue modules.
+ * Use `ModernToLegacyClientAdapter` to bridge the ClaudeClient interfaces.
+ */
+
 export class AgentExecutor {
   constructor(
     private readonly client: ClaudeClient,

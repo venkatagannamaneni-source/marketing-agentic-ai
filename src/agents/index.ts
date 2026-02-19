@@ -38,3 +38,9 @@ export type {
   ExecutionMetadata,
 } from "./executor.ts";
 export { AgentExecutor, DEFAULT_EXECUTOR_CONFIG } from "./executor.ts";
+
+// ── Client Adapters ────────────────────────────────────────────────────────
+export {
+  ModernToLegacyClientAdapter,
+  LegacyToModernClientAdapter,
+} from "./client-adapter.ts";
