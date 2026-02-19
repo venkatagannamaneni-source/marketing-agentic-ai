@@ -7,3 +7,9 @@ export {
   type PipelineErrorCode,
   PipelineError,
 } from "./types.ts";
+
+export {
+  runWithConcurrency,
+  type ConcurrencyOptions,
+  type ConcurrencyResult,
+} from "./concurrency.ts";

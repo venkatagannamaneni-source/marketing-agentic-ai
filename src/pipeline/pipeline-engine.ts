@@ -16,10 +16,12 @@ import type {
   StepResult,
 } from "./types.ts";
 import { PipelineError } from "./types.ts";
+import { runWithConcurrency } from "./concurrency.ts";
 
-// ── Valid starting statuses ─────────────────────────────────────────────────
+// ── Constants ───────────────────────────────────────────────────────────────
 
 const STARTABLE_STATUSES = new Set<PipelineStatus>(["pending", "paused"]);
+const DEFAULT_MAX_CONCURRENCY = 3;
 
 // ── Sequential Pipeline Engine ──────────────────────────────────────────────
 
@@ -221,7 +223,7 @@ export class SequentialPipelineEngine {
           inputPaths,
         );
       case "parallel":
-        return this.executeParallelStepSequentially(
+        return this.executeParallelStep(
           step,
           stepIndex,
           totalSteps,
@@ -339,9 +341,9 @@ export class SequentialPipelineEngine {
     };
   }
 
-  // ── Parallel Step (Sequential Fallback) ─────────────────────────────────
+  // ── Parallel Step ──────────────────────────────────────────────────────
 
-  private async executeParallelStepSequentially(
+  private async executeParallelStep(
     step: {
       readonly type: "parallel";
       readonly skills: readonly SkillName[];
@@ -354,7 +356,8 @@ export class SequentialPipelineEngine {
   ): Promise<StepResult> {
     const stepStart = Date.now();
 
-    // Create all tasks for the parallel step
+    // ── Create all tasks ──────────────────────────────────────────────
+
     let tasks: readonly Task[];
     try {
       tasks = this.factory.createTasksForStep(
@@ -385,33 +388,15 @@ export class SequentialPipelineEngine {
       };
     }
 
-    const executionResults: ExecutionResult[] = [];
-    const allOutputPaths: string[] = [];
+    // ── Record all task IDs upfront (before execution) ────────────────
 
-    // Execute tasks one at a time (Task 5 adds real parallelism)
     for (const task of tasks) {
-      // Check cancellation between sub-tasks
-      if (config.signal?.aborted) {
-        return {
-          stepIndex,
-          step,
-          tasks: [...tasks],
-          executionResults,
-          outputPaths: allOutputPaths,
-          status: "failed",
-          durationMs: Date.now() - stepStart,
-          error: new PipelineError(
-            "Pipeline cancelled during parallel step execution",
-            "ABORTED",
-            run.id,
-            stepIndex,
-          ),
-        };
-      }
-
-      // Record and persist
       run.taskIds.push(task.id);
+    }
 
+    // ── Persist all tasks to workspace (before execution) ─────────────
+
+    for (const task of tasks) {
       try {
         await this.workspace.writeTask(task);
       } catch (err: unknown) {
@@ -419,8 +404,8 @@ export class SequentialPipelineEngine {
           stepIndex,
           step,
           tasks: [...tasks],
-          executionResults,
-          outputPaths: allOutputPaths,
+          executionResults: [],
+          outputPaths: [],
           status: "failed",
           durationMs: Date.now() - stepStart,
           error: new PipelineError(
@@ -432,35 +417,67 @@ export class SequentialPipelineEngine {
           ),
         };
       }
+    }
 
-      // Execute
-      const result = await this.executor.execute(task, {
-        signal: config.signal,
-      });
-      executionResults.push(result);
+    // ── Execute tasks concurrently ────────────────────────────────────
 
-      if (result.status === "failed") {
-        return {
+    const maxConcurrency =
+      config.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
+
+    const taskFunctions = tasks.map(
+      (task) => (signal: AbortSignal) =>
+        this.executor.execute(task, { signal }),
+    );
+
+    const concurrencyResult = await runWithConcurrency({
+      tasks: taskFunctions,
+      maxConcurrency,
+      signal: config.signal,
+      isFailed: (result: ExecutionResult) => result.status === "failed",
+    });
+
+    // ── Process results ───────────────────────────────────────────────
+
+    const executionResults = [...concurrencyResult.results];
+
+    if (concurrencyResult.aborted) {
+      return {
+        stepIndex,
+        step,
+        tasks: [...tasks],
+        executionResults,
+        outputPaths: this.collectOutputPaths(executionResults),
+        status: "failed",
+        durationMs: Date.now() - stepStart,
+        error: new PipelineError(
+          "Pipeline cancelled during parallel step execution",
+          "ABORTED",
+          run.id,
           stepIndex,
-          step,
-          tasks: [...tasks],
-          executionResults,
-          outputPaths: allOutputPaths,
-          status: "failed",
-          durationMs: Date.now() - stepStart,
-          error: new PipelineError(
-            `Parallel step ${stepIndex} failed: agent "${task.to}" execution failed — ${result.error?.message ?? "unknown reason"}`,
-            "STEP_FAILED",
-            run.id,
-            stepIndex,
-            result.error,
-          ),
-        };
-      }
+        ),
+      };
+    }
 
-      if (result.outputPath) {
-        allOutputPaths.push(result.outputPath);
-      }
+    if (concurrencyResult.firstFailureIndex !== null) {
+      const failedResult =
+        executionResults[concurrencyResult.firstFailureIndex];
+      const failedTask = tasks[concurrencyResult.firstFailureIndex];
+      return {
+        stepIndex,
+        step,
+        tasks: [...tasks],
+        executionResults,
+        outputPaths: this.collectOutputPaths(executionResults),
+        status: "failed",
+        durationMs: Date.now() - stepStart,
+        error: new PipelineError(
+          `Parallel step ${stepIndex} failed: agent "${failedTask?.to ?? "unknown"}" execution failed — ${failedResult?.error?.message ?? "unknown reason"}`,
+          "STEP_FAILED",
+          run.id,
+          stepIndex,
+          failedResult?.error,
+        ),
+      };
     }
 
     return {
@@ -468,7 +485,7 @@ export class SequentialPipelineEngine {
       step,
       tasks: [...tasks],
       executionResults,
-      outputPaths: allOutputPaths,
+      outputPaths: this.collectOutputPaths(executionResults),
       status: "completed",
       durationMs: Date.now() - stepStart,
     };

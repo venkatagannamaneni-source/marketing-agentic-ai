@@ -66,6 +66,7 @@ export interface PipelineEngineConfig {
   readonly priority: Priority;
   readonly signal?: AbortSignal;
   readonly initialInputPaths?: readonly string[];
+  readonly maxConcurrency?: number;
   readonly onStepComplete?: (stepResult: StepResult) => void;
   readonly onStatusChange?: (run: PipelineRun) => void;
 }

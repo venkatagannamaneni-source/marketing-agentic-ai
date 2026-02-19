@@ -5,6 +5,8 @@ import type { PipelineDefinition, PipelineRun } from "../../types/pipeline.ts";
 import type { SkillName } from "../../types/agent.ts";
 import { FileSystemWorkspaceManager } from "../../workspace/workspace-manager.ts";
 import { generateRunId } from "../../workspace/id.ts";
+import type { ClaudeRequest, ClaudeResponse } from "../../executor/types.ts";
+import { cancellableSleep } from "../../executor/utils.ts";
 
 // ── Test Workspace ──────────────────────────────────────────────────────────
 
@@ -88,6 +90,84 @@ export function createReviewStepDefinition(): PipelineDefinition {
       { type: "sequential", skill: "copy-editing" as SkillName },
     ],
   });
+}
+
+// ── Concurrency Tracking Client ─────────────────────────────────────────────
+
+export interface ConcurrencyTracker {
+  client: ConcurrencyTrackingClaudeClient;
+  getMaxConcurrent: () => number;
+  getConcurrentNow: () => number;
+}
+
+/**
+ * A ClaudeClient implementation that tracks concurrent call count.
+ * Each call has an artificial delay so concurrent calls overlap,
+ * enabling tests to verify concurrency limits.
+ */
+export class ConcurrencyTrackingClaudeClient {
+  readonly calls: ClaudeRequest[] = [];
+  private concurrent = 0;
+  private maxConcurrentSeen = 0;
+  private readonly delayMs: number;
+  private readonly failOnSkill: SkillName | undefined;
+
+  constructor(options?: { delayMs?: number; failOnSkill?: SkillName }) {
+    this.delayMs = options?.delayMs ?? 50;
+    this.failOnSkill = options?.failOnSkill;
+  }
+
+  getMaxConcurrent(): number {
+    return this.maxConcurrentSeen;
+  }
+
+  getConcurrentNow(): number {
+    return this.concurrent;
+  }
+
+  async complete(request: ClaudeRequest): Promise<ClaudeResponse> {
+    if (request.signal?.aborted) {
+      throw new Error("Aborted");
+    }
+
+    this.concurrent++;
+    this.maxConcurrentSeen = Math.max(this.maxConcurrentSeen, this.concurrent);
+
+    try {
+      // Simulate work with a cancellable delay
+      await cancellableSleep(this.delayMs, request.signal);
+
+      this.calls.push(request);
+
+      if (
+        this.failOnSkill &&
+        request.userMessage.includes(this.failOnSkill)
+      ) {
+        throw new Error(`Simulated failure for skill: ${this.failOnSkill}`);
+      }
+
+      return {
+        content: "Mock output for concurrent task",
+        inputTokens: 100,
+        outputTokens: 200,
+        stopReason: "end_turn",
+      };
+    } finally {
+      this.concurrent--;
+    }
+  }
+}
+
+export function createConcurrencyTrackingClient(options?: {
+  delayMs?: number;
+  failOnSkill?: SkillName;
+}): ConcurrencyTracker {
+  const client = new ConcurrencyTrackingClaudeClient(options);
+  return {
+    client,
+    getMaxConcurrent: () => client.getMaxConcurrent(),
+    getConcurrentNow: () => client.getConcurrentNow(),
+  };
 }
 
 // ── Pipeline Run Fixtures ───────────────────────────────────────────────────

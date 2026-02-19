@@ -19,6 +19,7 @@ import {
   createParallelStepDefinition,
   createReviewStepDefinition,
   createTestRun,
+  createConcurrencyTrackingClient,
   type TestWorkspace,
 } from "./helpers.ts";
 
@@ -207,10 +208,10 @@ describe("SequentialPipelineEngine — happy path", () => {
   });
 });
 
-// ── Parallel Step Fallback ──────────────────────────────────────────────────
+// ── Parallel Step Execution ──────────────────────────────────────────────────
 
-describe("SequentialPipelineEngine — parallel step fallback", () => {
-  it("executes parallel step skills sequentially", async () => {
+describe("SequentialPipelineEngine — parallel step execution", () => {
+  it("executes parallel step skills concurrently", async () => {
     const definition = createParallelStepDefinition();
     const run = createTestRun({ pipelineId: definition.id });
 
@@ -255,7 +256,7 @@ describe("SequentialPipelineEngine — parallel step fallback", () => {
     client = new MockClaudeClient((req: ClaudeRequest) => {
       callCount++;
       if (callCount === 3) {
-        // 3rd call is 2nd parallel sub-task (1 sequential + 2 parallel)
+        // 3rd call is 2nd parallel sub-task (1 sequential + 2 parallel, maxConcurrency=1)
         throw new ExecutionError("API exploded", "API_ERROR", "");
       }
       return {
@@ -271,26 +272,77 @@ describe("SequentialPipelineEngine — parallel step fallback", () => {
     const definition = createParallelStepDefinition();
     const run = createTestRun({ pipelineId: definition.id });
 
-    const result = await engine.execute(definition, run, defaultConfig());
+    // Use maxConcurrency=1 for deterministic failure ordering
+    const result = await engine.execute(
+      definition,
+      run,
+      defaultConfig({ maxConcurrency: 1 }),
+    );
 
     expect(result.status).toBe("failed");
     // Step 0 succeeded, step 1 failed
     expect(result.stepResults).toHaveLength(2);
     expect(result.stepResults[0]!.status).toBe("completed");
     expect(result.stepResults[1]!.status).toBe("failed");
-    // Only 2 of the 4 parallel sub-tasks were attempted before failure
+    // With maxConcurrency=1, exactly 2 of 4 sub-tasks ran before failure
     expect(result.stepResults[1]!.executionResults).toHaveLength(2);
     expect(result.error?.code).toBe("STEP_FAILED");
   });
 
-  it("records all parallel task IDs on the PipelineRun", async () => {
+  it("records all parallel task IDs on the PipelineRun before execution", async () => {
     const definition = createParallelStepDefinition();
     const run = createTestRun({ pipelineId: definition.id });
 
     await engine.execute(definition, run, defaultConfig());
 
-    // 1 sequential + 4 parallel = 5 task IDs
+    // 1 sequential + 4 parallel = 5 task IDs (all recorded upfront)
     expect(run.taskIds).toHaveLength(5);
+  });
+
+  it("records all task IDs even when parallel execution fails immediately", async () => {
+    client = new MockClaudeClient((req: ClaudeRequest) => {
+      throw new ExecutionError("API exploded", "API_ERROR", "");
+    });
+    executor = new AgentExecutor(client, tw.workspace, executorConfig);
+    engine = new SequentialPipelineEngine(factory, executor, tw.workspace);
+
+    const definition = createTestDefinition({
+      id: "parallel-fail-ids",
+      steps: [
+        {
+          type: "parallel",
+          skills: ["copywriting", "social-content", "paid-ads"],
+        },
+      ],
+    });
+    const run = createTestRun({ pipelineId: definition.id });
+
+    await engine.execute(definition, run, defaultConfig());
+
+    // All 3 task IDs recorded even though execution failed
+    expect(run.taskIds).toHaveLength(3);
+  });
+
+  it("returns execution results in task order", async () => {
+    const definition = createTestDefinition({
+      id: "parallel-order-test",
+      steps: [
+        {
+          type: "parallel",
+          skills: ["copywriting", "email-sequence", "social-content"],
+        },
+      ],
+    });
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(definition, run, defaultConfig());
+
+    expect(result.status).toBe("completed");
+    const skills = result.stepResults[0]!.executionResults.map(
+      (r) => r.skill,
+    );
+    // Results should be in the same order as the skills array
+    expect(skills).toEqual(["copywriting", "email-sequence", "social-content"]);
   });
 });
 
@@ -843,5 +895,131 @@ describe("SequentialPipelineEngine — review at last step (BUG 1)", () => {
     expect(resumedResult.stepResults).toHaveLength(0); // no steps after review
     expect(run.status).toBe("completed");
     expect(run.completedAt).not.toBeNull();
+  });
+});
+
+// ── Parallel Concurrency Control ────────────────────────────────────────────
+
+describe("SequentialPipelineEngine — concurrency control", () => {
+  it("respects maxConcurrency limit for parallel steps", async () => {
+    const tracker = createConcurrencyTrackingClient({ delayMs: 40 });
+    executor = new AgentExecutor(
+      tracker.client as any,
+      tw.workspace,
+      executorConfig,
+    );
+    engine = new SequentialPipelineEngine(factory, executor, tw.workspace);
+
+    const definition = createParallelStepDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(
+      definition,
+      run,
+      defaultConfig({ maxConcurrency: 2 }),
+    );
+
+    expect(result.status).toBe("completed");
+    // At most 2 API calls were in-flight simultaneously
+    expect(tracker.getMaxConcurrent()).toBeLessThanOrEqual(2);
+    // All 4 parallel tasks completed
+    expect(result.stepResults[1]!.executionResults).toHaveLength(4);
+  });
+
+  it("maxConcurrency=1 executes tasks sequentially", async () => {
+    const tracker = createConcurrencyTrackingClient({ delayMs: 10 });
+    executor = new AgentExecutor(
+      tracker.client as any,
+      tw.workspace,
+      executorConfig,
+    );
+    engine = new SequentialPipelineEngine(factory, executor, tw.workspace);
+
+    const definition = createParallelStepDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(
+      definition,
+      run,
+      defaultConfig({ maxConcurrency: 1 }),
+    );
+
+    expect(result.status).toBe("completed");
+    // Only 1 API call at a time
+    expect(tracker.getMaxConcurrent()).toBe(1);
+  });
+
+  it("uses default concurrency (3) when maxConcurrency not specified", async () => {
+    const tracker = createConcurrencyTrackingClient({ delayMs: 40 });
+    executor = new AgentExecutor(
+      tracker.client as any,
+      tw.workspace,
+      executorConfig,
+    );
+    engine = new SequentialPipelineEngine(factory, executor, tw.workspace);
+
+    const definition = createParallelStepDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    // No maxConcurrency → defaults to 3
+    const result = await engine.execute(definition, run, defaultConfig());
+
+    expect(result.status).toBe("completed");
+    expect(tracker.getMaxConcurrent()).toBeLessThanOrEqual(3);
+  });
+
+  it("maxConcurrency > task count runs all tasks immediately", async () => {
+    const definition = createTestDefinition({
+      id: "small-parallel",
+      steps: [
+        {
+          type: "parallel",
+          skills: ["copywriting", "social-content"],
+        },
+      ],
+    });
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(
+      definition,
+      run,
+      defaultConfig({ maxConcurrency: 10 }),
+    );
+
+    expect(result.status).toBe("completed");
+    expect(result.stepResults[0]!.executionResults).toHaveLength(2);
+  });
+
+  it("actively cancels in-flight parallel tasks on failure", async () => {
+    const tracker = createConcurrencyTrackingClient({
+      delayMs: 40,
+      failOnSkill: "email-sequence" as any,
+    });
+    executor = new AgentExecutor(
+      tracker.client as any,
+      tw.workspace,
+      executorConfig,
+    );
+    engine = new SequentialPipelineEngine(factory, executor, tw.workspace);
+
+    const definition = createParallelStepDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(
+      definition,
+      run,
+      defaultConfig({ maxConcurrency: 4 }),
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("STEP_FAILED");
+    // Not all 4 parallel tasks completed successfully
+    const parallelStep = result.stepResults[1]!;
+    expect(parallelStep.status).toBe("failed");
+    // Fewer than 4 tasks completed successfully
+    const completedCount = parallelStep.executionResults.filter(
+      (r) => r.status === "completed",
+    ).length;
+    expect(completedCount).toBeLessThan(4);
   });
 });
