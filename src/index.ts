@@ -81,7 +81,7 @@ export {
   createWorkspacePaths,
 } from "./workspace/index.ts";
 
-// ── Agents ────────────────────────────────────────────────────────────────────
+// ── Agents (Task 7 — new modular agent system) ──────────────────────────────
 export {
   AGENT_DEPENDENCY_GRAPH,
   getUpstreamSkills,
@@ -90,13 +90,13 @@ export {
   PIPELINE_TEMPLATES,
   loadSkillMeta,
   loadAllSkills,
-  // Claude Client
-  type ClaudeClient,
+  // Claude Client (new)
+  type ClaudeClient as AgentClaudeClient,
   type ClaudeMessageParams,
   type ClaudeMessage,
   type ClaudeMessageResult,
-  type ExecutionErrorCode,
-  ExecutionError,
+  type ExecutionErrorCode as AgentExecutionErrorCode,
+  ExecutionError as AgentExecutionError,
   MODEL_MAP,
   COST_PER_MILLION_TOKENS,
   estimateCost,
@@ -106,13 +106,37 @@ export {
   // Prompt Builder
   type BuiltPrompt,
   buildAgentPrompt,
-  // Agent Executor
-  type ExecutorConfig,
-  type ExecutionResult,
+  // Agent Executor (new)
+  type ExecutorConfig as AgentExecutorConfig,
+  type ExecutionResult as AgentExecutionResult,
   type ExecutionMetadata,
-  AgentExecutor,
+  AgentExecutor as ModularAgentExecutor,
   DEFAULT_EXECUTOR_CONFIG,
 } from "./agents/index.ts";
+
+// ── Executor (Tasks 1-6 — used by pipeline and queue) ──────────────────────
+export {
+  AgentExecutor,
+  AnthropicClaudeClient as LegacyAnthropicClaudeClient,
+  MockClaudeClient,
+  loadSkillContent,
+  buildPrompt,
+  cancellableSleep,
+  ExecutionError,
+  DEFAULT_MODEL_MAP,
+  createDefaultConfig,
+  type ClaudeClient,
+  type ClaudeClientConfig,
+  type ClaudeRequest,
+  type ClaudeResponse,
+  type ExecutionResult,
+  type ExecutionStatus,
+  type ExecutorConfig,
+  type ExecutionErrorCode,
+  type SkillContent,
+  type BuildPromptParams,
+  type UpstreamOutput,
+} from "./executor/index.ts";
 
 // ── Director ─────────────────────────────────────────────────────────────────
 export type {
@@ -150,3 +174,57 @@ export {
   MarketingDirector,
   generateGoalId,
 } from "./director/index.ts";
+
+// ── Pipeline Engine ──────────────────────────────────────────────────────────
+export {
+  SequentialPipelineEngine,
+  PipelineError,
+  type PipelineEngineConfig,
+  type StepResult,
+  type PipelineResult,
+  type PipelineErrorCode,
+} from "./pipeline/index.ts";
+
+// ── Queue ────────────────────────────────────────────────────────────────────
+export type {
+  RedisConfig,
+  TaskQueueConfig,
+  QueueRetryConfig,
+  QueueJobData,
+  QueueJobResult,
+  RoutingAction,
+  DeadLetterEntry,
+  QueueHealth,
+  QueueAddOptions,
+  QueueAdapter,
+  FailedJob,
+  WorkerAdapter,
+  JobHandle,
+  ProcessorFn,
+  BudgetDecision,
+  WorkerProcessorDeps,
+  TaskQueueManagerDeps,
+  EnqueueResult,
+  RedisClient,
+  RedisConnectionManager,
+} from "./queue/index.ts";
+
+export {
+  DEFAULT_REDIS_CONFIG,
+  DEFAULT_QUEUE_RETRY,
+  DEFAULT_TASK_QUEUE_CONFIG,
+  BudgetDeferralError,
+  CascadePauseError,
+  TaskExecutionError,
+  PRIORITY_MAP,
+  taskPriorityToQueuePriority,
+  queuePriorityToTaskPriority,
+  BudgetGate,
+  FailureTracker,
+  FallbackQueue,
+  createRedisConnection,
+  createRedisConnectionFromClient,
+  CompletionRouter,
+  createWorkerProcessor,
+  TaskQueueManager,
+} from "./queue/index.ts";
