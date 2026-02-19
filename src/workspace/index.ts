@@ -3,7 +3,12 @@ export {
   type WorkspaceErrorCode,
 } from "./errors.ts";
 
-export { generateTaskId, generateReviewId, generateRunId } from "./id.ts";
+export {
+  generateTaskId,
+  generateReviewId,
+  generateRunId,
+  generateHumanReviewId,
+} from "./id.ts";
 
 export { type FileLock, acquireLock } from "./lock.ts";
 
@@ -20,6 +25,11 @@ export {
   serializeGoalPlan,
   deserializeGoalPlan,
 } from "./markdown.ts";
+
+export {
+  serializeHumanReview,
+  deserializeHumanReview,
+} from "./human-review-markdown.ts";
 
 export { validateTask, validateReview } from "./validation.ts";
 

@@ -5,6 +5,7 @@ import type { Task, TaskStatus, TaskFilter } from "../types/task.ts";
 import { validateTransition } from "../types/task.ts";
 import type { Review } from "../types/review.ts";
 import type { Goal, GoalPlan } from "../types/goal.ts";
+import type { HumanReviewItem, HumanReviewFilter } from "../types/human-review.ts";
 import type { SkillName, SquadName } from "../types/agent.ts";
 import { SKILL_NAMES, SKILL_SQUAD_MAP, SQUAD_NAMES } from "../types/agent.ts";
 import { WORKSPACE_DIRS } from "../types/workspace.ts";
@@ -21,6 +22,10 @@ import {
   serializeGoalPlan,
   deserializeGoalPlan,
 } from "./markdown.ts";
+import {
+  serializeHumanReview,
+  deserializeHumanReview,
+} from "./human-review-markdown.ts";
 
 // ── WorkspaceManager Interface ───────────────────────────────────────────────
 
@@ -78,6 +83,15 @@ export interface WorkspaceManager {
   // Metrics
   writeMetricsReport(date: string, content: string): Promise<void>;
   readMetricsReport(date: string): Promise<string>;
+
+  // Human review operations
+  writeHumanReview(item: HumanReviewItem): Promise<void>;
+  readHumanReview(reviewId: string): Promise<HumanReviewItem>;
+  listHumanReviews(filter?: HumanReviewFilter): Promise<HumanReviewItem[]>;
+  updateHumanReview(
+    reviewId: string,
+    updates: Partial<Pick<HumanReviewItem, "status" | "feedback" | "resolvedAt">>,
+  ): Promise<void>;
 }
 
 // ── Path Builder ─────────────────────────────────────────────────────────────
@@ -125,6 +139,9 @@ export class FileSystemWorkspaceManager implements WorkspaceManager {
     for (const dir of WORKSPACE_DIRS) {
       await mkdir(resolve(this.rootDir, dir), { recursive: true });
     }
+
+    // Create reviews/human/ subdirectory for human review items
+    await mkdir(resolve(this.rootDir, "reviews", "human"), { recursive: true });
 
     // Create outputs/{squad}/{skill}/ for every skill
     for (const squad of SQUAD_NAMES) {
@@ -445,6 +462,72 @@ export class FileSystemWorkspaceManager implements WorkspaceManager {
     return this.readFile(`metrics/${date}-report.md`);
   }
 
+  // ── Human Review Operations ────────────────────────────────────────────
+
+  async writeHumanReview(item: HumanReviewItem): Promise<void> {
+    const content = serializeHumanReview(item);
+    await this.writeFile(`reviews/human/${item.id}.md`, content);
+  }
+
+  async readHumanReview(reviewId: string): Promise<HumanReviewItem> {
+    const content = await this.readFile(`reviews/human/${reviewId}.md`);
+    return deserializeHumanReview(content);
+  }
+
+  async listHumanReviews(filter?: HumanReviewFilter): Promise<HumanReviewItem[]> {
+    const files = await this.listFiles("reviews/human");
+    const items: HumanReviewItem[] = [];
+
+    for (const file of files) {
+      const content = await this.readFile(`reviews/human/${file}`);
+      try {
+        const item = deserializeHumanReview(content);
+        if (matchesHumanReviewFilter(item, filter)) {
+          items.push(item);
+        }
+      } catch {
+        // Skip malformed human review files
+      }
+    }
+
+    return items;
+  }
+
+  async updateHumanReview(
+    reviewId: string,
+    updates: Partial<Pick<HumanReviewItem, "status" | "feedback" | "resolvedAt">>,
+  ): Promise<void> {
+    const absPath = this.resolveSafe(`reviews/human/${reviewId}.md`);
+    const lock = await acquireLock(absPath);
+    try {
+      let content: string;
+      try {
+        content = await readFile(absPath, "utf-8");
+      } catch (err: unknown) {
+        if (isErrnoException(err) && err.code === "ENOENT") {
+          throw new WorkspaceError(
+            `File not found: reviews/human/${reviewId}.md`,
+            "NOT_FOUND",
+            `reviews/human/${reviewId}.md`,
+          );
+        }
+        throw new WorkspaceError(
+          `Failed to read: reviews/human/${reviewId}.md`,
+          "READ_FAILED",
+          `reviews/human/${reviewId}.md`,
+        );
+      }
+      const item = deserializeHumanReview(content);
+      const updated: HumanReviewItem = {
+        ...item,
+        ...updates,
+      };
+      await writeFile(absPath, serializeHumanReview(updated), "utf-8");
+    } finally {
+      await lock.release();
+    }
+  }
+
   // ── Path Safety ─────────────────────────────────────────────────────────
 
   private resolveSafe(relativePath: string): string {
@@ -489,6 +572,39 @@ function matchesFilter(task: Task, filter?: TaskFilter): boolean {
   }
 
   if (filter.pipelineId !== undefined && task.pipelineId !== filter.pipelineId) {
+    return false;
+  }
+
+  return true;
+}
+
+// ── Human Review Filter Matching ─────────────────────────────────────────────
+
+function matchesHumanReviewFilter(
+  item: HumanReviewItem,
+  filter?: HumanReviewFilter,
+): boolean {
+  if (!filter) return true;
+
+  if (filter.status !== undefined) {
+    const statuses = Array.isArray(filter.status)
+      ? filter.status
+      : [filter.status];
+    if (!statuses.includes(item.status)) return false;
+  }
+
+  if (filter.urgency !== undefined) {
+    const urgencies = Array.isArray(filter.urgency)
+      ? filter.urgency
+      : [filter.urgency];
+    if (!urgencies.includes(item.urgency)) return false;
+  }
+
+  if (filter.skill !== undefined && item.skill !== filter.skill) {
+    return false;
+  }
+
+  if (filter.goalId !== undefined && item.goalId !== filter.goalId) {
     return false;
   }
 

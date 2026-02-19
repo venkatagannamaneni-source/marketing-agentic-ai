@@ -40,10 +40,21 @@ export { PipelineFactory } from "./pipeline-factory.ts";
 
 // ── Review Engine ────────────────────────────────────────────────────────────
 export { ReviewEngine } from "./review-engine.ts";
-export type { SemanticReviewResult } from "./review-engine.ts";
+export type { SemanticReviewResult, QualityReviewResult } from "./review-engine.ts";
 
 // ── Escalation Engine ────────────────────────────────────────────────────────
 export { EscalationEngine } from "./escalation.ts";
+
+// ── Human Review Manager ─────────────────────────────────────────────────────
+export { HumanReviewManager } from "./human-review-manager.ts";
+
+// ── Quality Scoring ──────────────────────────────────────────────────────────
+export { QualityScorer } from "./quality-scorer.ts";
+export {
+  DEFAULT_SKILL_CRITERIA,
+  getSkillCriteria,
+  resolveThreshold,
+} from "./quality-criteria.ts";
 
 // ── Marketing Director ───────────────────────────────────────────────────────
 export { MarketingDirector, generateGoalId } from "./director.ts";

@@ -20,6 +20,8 @@ import type { BudgetState } from "./types.ts";
 import type { ModelTier } from "../types/agent.ts";
 import type { ClaudeClient } from "../agents/claude-client.ts";
 import { MODEL_MAP, estimateCost } from "../agents/claude-client.ts";
+import type { QualityScore, SkillQualityCriteria } from "../types/quality.ts";
+import type { QualityScorer } from "./quality-scorer.ts";
 
 // ── Semantic Review Result ──────────────────────────────────────────────────
 
@@ -37,10 +39,17 @@ const VALID_SEVERITIES: ReadonlySet<string> = new Set<string>([
   "suggestion",
 ]);
 
+export interface QualityReviewResult {
+  readonly decision: DirectorDecision;
+  readonly qualityScore: QualityScore;
+  readonly reviewCost: number;
+}
+
 export class ReviewEngine {
   constructor(
     private readonly config: DirectorConfig,
     private readonly client?: ClaudeClient,
+    private readonly qualityScorer?: QualityScorer,
   ) {}
 
   /**
@@ -253,6 +262,76 @@ export class ReviewEngine {
     );
 
     return { decision, reviewCost };
+  }
+
+  /**
+   * Evaluate a completed task with dimensional quality scoring.
+   * Returns both a DirectorDecision and a QualityScore.
+   * Requires a QualityScorer to be provided in the constructor.
+   * Falls back to structural-only scoring if no ClaudeClient.
+   */
+  async evaluateTaskWithQuality(
+    task: Task,
+    outputContent: string,
+    existingReviews: readonly Review[],
+    criteria: SkillQualityCriteria,
+    budgetState?: BudgetState,
+  ): Promise<QualityReviewResult> {
+    if (!this.qualityScorer) {
+      // No quality scorer — fall back to standard semantic evaluation
+      const result = await this.evaluateTaskSemantic(
+        task,
+        outputContent,
+        existingReviews,
+        budgetState,
+      );
+      // Return a placeholder quality score
+      const placeholderScore: QualityScore = {
+        taskId: task.id,
+        skill: task.to,
+        dimensions: [],
+        overallScore: 0,
+        scoredAt: new Date().toISOString(),
+        scoredBy: "structural",
+      };
+      return {
+        decision: result.decision,
+        qualityScore: placeholderScore,
+        reviewCost: result.reviewCost,
+      };
+    }
+
+    // Score using the quality scorer
+    const { score: qualityScore, cost } = this.client
+      ? await this.qualityScorer.scoreSemantic(
+          task,
+          outputContent,
+          criteria,
+          budgetState,
+        )
+      : { score: this.qualityScorer.scoreStructural(task, outputContent, criteria), cost: 0 };
+
+    // Convert quality score to verdict
+    const verdict = this.qualityScorer.scoreToVerdict(qualityScore, criteria);
+
+    // Convert to findings for the review
+    const findings = this.qualityScorer.scoreToFindings(qualityScore);
+
+    // Build decision using existing infrastructure
+    const reviewIndex = existingReviews.length;
+    const decision = this.buildDecisionFromFindings(
+      task,
+      findings,
+      [],
+      existingReviews,
+      reviewIndex,
+    );
+
+    return {
+      decision,
+      qualityScore,
+      reviewCost: cost,
+    };
   }
 
   /**

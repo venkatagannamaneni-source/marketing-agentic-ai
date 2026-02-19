@@ -26,3 +26,10 @@ export function generateReviewId(taskId: string, index: number): string {
 export function generateRunId(pipelineId: string): string {
   return `run-${pipelineId}-${Date.now()}`;
 }
+
+/**
+ * Generate a human review ID: "hr-{taskId}-{timestamp}"
+ */
+export function generateHumanReviewId(taskId: string): string {
+  return `hr-${taskId}-${Date.now()}`;
+}
