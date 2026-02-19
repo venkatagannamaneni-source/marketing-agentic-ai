@@ -62,9 +62,9 @@ export class ExecutionError extends Error {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 export const MODEL_MAP: Record<ModelTier, string> = {
-  opus: "claude-opus-4-20250514",
-  sonnet: "claude-sonnet-4-20250514",
-  haiku: "claude-haiku-4-20250514",
+  opus: "claude-opus-4-6",
+  sonnet: "claude-sonnet-4-5-20250929",
+  haiku: "claude-haiku-4-5-20251001",
 };
 
 export const COST_PER_MILLION_TOKENS: Record<
