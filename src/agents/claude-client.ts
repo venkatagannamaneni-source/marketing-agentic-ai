@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ModelTier } from "../types/agent.ts";
+import { NULL_LOGGER } from "../observability/logger.ts";
+import type { Logger } from "../observability/logger.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -111,24 +113,40 @@ function sleep(ms: number): Promise<void> {
 
 export class AnthropicClaudeClient implements ClaudeClient {
   private readonly anthropic: Anthropic;
+  private readonly logger: Logger;
 
   /**
    * @param anthropicInstance Optional pre-configured Anthropic SDK instance.
    *   If not provided, creates one using ANTHROPIC_API_KEY from environment.
+   * @param logger Optional Logger for structured logging.
    */
-  constructor(anthropicInstance?: Anthropic) {
+  constructor(anthropicInstance?: Anthropic, logger?: Logger) {
     this.anthropic = anthropicInstance ?? new Anthropic();
+    this.logger = (logger ?? NULL_LOGGER).child({ module: "claude-client" });
   }
 
   async createMessage(
     params: ClaudeMessageParams,
   ): Promise<ClaudeMessageResult> {
+    this.logger.debug("claude_request_started", {
+      model: params.model,
+      maxTokens: params.maxTokens,
+    });
+
     const startTime = Date.now();
     const response = await this.callWithRetry(params);
     const durationMs = Date.now() - startTime;
 
     const textBlock = response.content.find((b) => b.type === "text");
     const content = textBlock?.type === "text" ? textBlock.text : "";
+
+    this.logger.info("claude_request_completed", {
+      model: response.model,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      durationMs,
+      stopReason: response.stop_reason ?? "unknown",
+    });
 
     return {
       content,
@@ -177,7 +195,13 @@ export class AnthropicClaudeClient implements ClaudeClient {
           classified === "rate_limited" &&
           rateLimitRetries < RATE_LIMIT_BACKOFFS_MS.length
         ) {
-          await sleep(RATE_LIMIT_BACKOFFS_MS[rateLimitRetries]!);
+          const backoffMs = RATE_LIMIT_BACKOFFS_MS[rateLimitRetries]!;
+          this.logger.warn("claude_rate_limited", {
+            retryAttempt: rateLimitRetries + 1,
+            backoffMs,
+            model: params.model,
+          });
+          await sleep(backoffMs);
           rateLimitRetries++;
           continue;
         }
@@ -186,17 +210,32 @@ export class AnthropicClaudeClient implements ClaudeClient {
           classified === "server_error" &&
           serverErrorRetries < SERVER_ERROR_BACKOFFS_MS.length
         ) {
-          await sleep(SERVER_ERROR_BACKOFFS_MS[serverErrorRetries]!);
+          const backoffMs = SERVER_ERROR_BACKOFFS_MS[serverErrorRetries]!;
+          this.logger.warn("claude_server_error", {
+            retryAttempt: serverErrorRetries + 1,
+            backoffMs,
+            model: params.model,
+          });
+          await sleep(backoffMs);
           serverErrorRetries++;
           continue;
         }
 
         if (classified === "timeout" && timeoutRetries < TIMEOUT_MAX_RETRIES) {
+          this.logger.warn("claude_timeout_retry", {
+            retryAttempt: timeoutRetries + 1,
+            model: params.model,
+          });
           timeoutRetries++;
           continue;
         }
 
         // Non-retryable or retries exhausted
+        this.logger.error("claude_request_failed", {
+          classification: classified,
+          model: params.model,
+          error: err instanceof Error ? err.message : String(err),
+        });
         throw toExecutionError(classified, err);
       }
     }

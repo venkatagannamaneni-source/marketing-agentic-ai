@@ -6,21 +6,33 @@ import type { WorkspaceManager } from "../workspace/workspace-manager.ts";
 import type { MarketingDirector } from "../director/director.ts";
 import type { RoutingAction } from "./types.ts";
 import { generateTaskId } from "../workspace/id.ts";
+import { NULL_LOGGER } from "../observability/logger.ts";
+import type { Logger } from "../observability/logger.ts";
 
 // ── Completion Router ───────────────────────────────────────────────────────
 // Routes completed tasks to their next step based on task.next.
 // This is the orchestration glue that closes the Director→Queue→Executor→Director loop.
 
 export class CompletionRouter {
+  private readonly logger: Logger;
+
   constructor(
     private readonly workspace: WorkspaceManager,
     private readonly director: MarketingDirector,
-  ) {}
+    logger?: Logger,
+  ) {
+    this.logger = (logger ?? NULL_LOGGER).child({ module: "completion-router" });
+  }
 
   /**
    * Determine what to do after a task completes execution.
    */
   async route(task: Task, result: ExecutionResult): Promise<RoutingAction> {
+    this.logger.debug("router_route_started", {
+      taskId: task.id,
+      nextType: task.next.type,
+    });
+
     switch (task.next.type) {
       case "agent":
         return this.routeToAgent(task, task.next.skill, result);
@@ -48,11 +60,20 @@ export class CompletionRouter {
   ): Promise<RoutingAction> {
     const followUpTask = this.createFollowUpTask(previousTask, nextSkill, result);
     await this.workspace.writeTask(followUpTask);
+    this.logger.info("router_to_agent", {
+      taskId: previousTask.id,
+      nextSkill,
+      followUpTaskId: followUpTask.id,
+    });
     return { type: "enqueue_tasks", tasks: [followUpTask] };
   }
 
   private async routeToDirectorReview(task: Task): Promise<RoutingAction> {
     const decision = await this.director.reviewCompletedTask(task.id);
+    this.logger.info("router_to_director_review", {
+      taskId: task.id,
+      action: decision.action,
+    });
 
     switch (decision.action) {
       case "approve":

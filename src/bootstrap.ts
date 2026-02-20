@@ -24,6 +24,10 @@ import {
   BullMQQueueAdapter,
   BullMQWorkerAdapter,
 } from "./queue/bullmq-adapter.ts";
+import { EventBus } from "./events/event-bus.ts";
+import { DEFAULT_EVENT_MAPPINGS } from "./events/default-mappings.ts";
+import { Scheduler } from "./scheduler/scheduler.ts";
+import { DEFAULT_SCHEDULES } from "./scheduler/default-schedules.ts";
 
 // ── Application Interface ──────────────────────────────────────────────────
 
@@ -37,6 +41,8 @@ export interface Application {
   readonly queueManager: TaskQueueManager;
   readonly costTracker: CostTracker;
   readonly logger: Logger;
+  readonly eventBus: EventBus;
+  readonly scheduler: Scheduler;
 
   start(): Promise<void>;
   shutdown(): Promise<void>;
@@ -74,7 +80,10 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
   logger.info("Workspace initialized", { rootDir: config.workspace.rootDir });
 
   // 3. Claude client (Anthropic SDK auto-reads ANTHROPIC_API_KEY from env)
-  const client = new AnthropicClaudeClient();
+  const client = new AnthropicClaudeClient(
+    undefined,
+    logger.child({ module: "claude-client" }),
+  );
 
   // 4. Executor config
   const executorConfig: ExecutorConfig = {
@@ -87,7 +96,12 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
   };
 
   // 5. Agent Executor
-  const executor = new AgentExecutor(client, workspace, executorConfig);
+  const executor = new AgentExecutor(
+    client,
+    workspace,
+    executorConfig,
+    logger.child({ module: "executor" }),
+  );
 
   // 6. Cost Tracker (replaces closure-based budgetProvider)
   const costTracker = new CostTracker({
@@ -112,6 +126,8 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     },
     client,
     executorConfig,
+    undefined,
+    logger.child({ module: "director" }),
   );
 
   // 8. Pipeline Engine
@@ -120,6 +136,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     pipelineFactory,
     executor,
     workspace,
+    logger.child({ module: "pipeline" }),
   );
 
   // 9. Redis connection (lazy connect — no TCP until first operation)
@@ -134,7 +151,11 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
   logger.info("Redis connection created (lazy — will connect on first use)");
 
   // 10. Worker processor
-  const completionRouter = new CompletionRouter(workspace, director);
+  const completionRouter = new CompletionRouter(
+    workspace,
+    director,
+    logger.child({ module: "completion-router" }),
+  );
   const failureTracker = new FailureTracker();
   const processor = createWorkerProcessor({
     workspace,
@@ -142,6 +163,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     budgetProvider: () => costTracker.toBudgetState(),
     failureTracker,
     completionRouter,
+    logger: logger.child({ module: "worker-processor" }),
   });
 
   // 11. BullMQ adapters (real queue and worker)
@@ -174,12 +196,28 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
       maxParallelAgents: config.maxParallelAgents,
       fallbackDir: `${config.workspace.rootDir}/queue-fallback`,
     },
+    logger: logger.child({ module: "queue-manager" }),
   });
 
-  // 13. Shutdown guard
+  // 13. EventBus
+  const eventBus = new EventBus(DEFAULT_EVENT_MAPPINGS, {
+    director,
+    queueManager,
+    logger: logger.child({ module: "event-bus" }),
+  });
+
+  // 14. Scheduler
+  const scheduler = new Scheduler({
+    director,
+    workspace,
+    logger,
+    budgetProvider: () => costTracker.toBudgetState(),
+  });
+
+  // 15. Shutdown guard
   let shuttingDown = false;
 
-  // 14. Build Application object
+  // 16. Build Application object
   const app: Application = {
     config,
     workspace,
@@ -190,11 +228,15 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     queueManager,
     costTracker,
     logger,
+    eventBus,
+    scheduler,
 
     async start(): Promise<void> {
       logger.info("Starting application");
       await queueManager.start();
       logger.info("Queue manager started");
+      await scheduler.start(DEFAULT_SCHEDULES);
+      logger.info("Scheduler started");
     },
 
     async shutdown(): Promise<void> {
@@ -202,7 +244,17 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
       shuttingDown = true;
       logger.info("Shutting down application");
 
-      // 1. Stop queue manager (stops health checks, closes worker and queue)
+      // 1. Stop scheduler first (prevents new work being created)
+      try {
+        await scheduler.stop();
+        logger.info("Scheduler stopped");
+      } catch (err: unknown) {
+        logger.error("Error stopping scheduler", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      // 2. Stop queue manager (stops health checks, closes worker and queue)
       try {
         await queueManager.stop();
         logger.info("Queue manager stopped");
@@ -212,7 +264,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
         });
       }
 
-      // 2. Flush cost data to workspace
+      // 3. Flush cost data to workspace
       try {
         const metricsDir = `${config.workspace.rootDir}/metrics`;
         await costTracker.flush(metricsDir, {
@@ -230,7 +282,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
         });
       }
 
-      // 3. Close Redis connection
+      // 4. Close Redis connection
       try {
         await redis.close();
         logger.info("Redis connection closed");
@@ -240,7 +292,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
         });
       }
 
-      // 4. Remove signal handlers to prevent accumulation
+      // 5. Remove signal handlers to prevent accumulation
       process.removeListener("SIGTERM", sigtermHandler);
       process.removeListener("SIGINT", sigintHandler);
 
@@ -248,7 +300,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     },
   };
 
-  // 15. Signal handlers for graceful shutdown (with dedup guard)
+  // 17. Signal handlers for graceful shutdown (with dedup guard)
   let signalHandled = false;
   const onSignal = async (signal: string) => {
     if (signalHandled) return;

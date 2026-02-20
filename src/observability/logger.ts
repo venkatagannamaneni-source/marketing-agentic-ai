@@ -208,3 +208,20 @@ export class BufferLogger implements Logger {
     );
   }
 }
+
+// ── NullLogger (no-op for when logging is disabled) ─────────────────────────
+
+class NullLoggerImpl implements Logger {
+  trace(_msg: string, _data?: Record<string, unknown>): void {}
+  debug(_msg: string, _data?: Record<string, unknown>): void {}
+  info(_msg: string, _data?: Record<string, unknown>): void {}
+  warn(_msg: string, _data?: Record<string, unknown>): void {}
+  error(_msg: string, _data?: Record<string, unknown>): void {}
+  fatal(_msg: string, _data?: Record<string, unknown>): void {}
+  child(_bindings: Record<string, unknown>): Logger {
+    return this;
+  }
+}
+
+/** Singleton no-op Logger. Used as the default when no Logger is provided. */
+export const NULL_LOGGER: Logger = new NullLoggerImpl();

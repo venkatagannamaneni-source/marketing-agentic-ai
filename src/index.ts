@@ -286,6 +286,43 @@ export {
   type BullMQConnectionOptions,
 } from "./queue/bullmq-adapter.ts";
 
+// ── Observability ────────────────────────────────────────────────────────
+export {
+  createLogger,
+  BufferLogger,
+  NULL_LOGGER,
+  DEFAULT_LOGGER_CONFIG,
+  LOG_LEVELS,
+  LOG_FORMATS,
+  CostTracker,
+  DEFAULT_COST_TRACKER_CONFIG,
+  MetricsCollector,
+  HealthMonitor,
+  DEFAULT_HEALTH_MONITOR_CONFIG,
+} from "./observability/index.ts";
+
+export type {
+  Logger,
+  LoggerConfig,
+  LogLevel,
+  LogFormat,
+  LogEntry,
+  CostEntry,
+  CostTrackerConfig,
+  SkillCostSummary,
+  ModelCostSummary,
+  DailyCostSummary,
+  CostFileWriter,
+  TaskExecutionRecord,
+  PipelineRunRecord,
+  GoalCompletionRecord,
+  SkillStats,
+  MetricsSnapshot,
+  MetricsFileWriter,
+  HealthCheckFn,
+  HealthMonitorConfig,
+} from "./observability/index.ts";
+
 // ── Config ──────────────────────────────────────────────────────────────────
 export {
   loadConfig,

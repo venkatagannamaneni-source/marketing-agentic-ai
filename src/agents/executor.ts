@@ -5,6 +5,8 @@ import { SKILL_SQUAD_MAP, FOUNDATION_SKILL } from "../types/agent.ts";
 import type { Task, TaskStatus } from "../types/task.ts";
 import type { BudgetState } from "../director/types.ts";
 import type { WorkspaceManager } from "../workspace/workspace-manager.ts";
+import { NULL_LOGGER } from "../observability/logger.ts";
+import type { Logger } from "../observability/logger.ts";
 import { loadSkillMeta } from "./skill-loader.ts";
 import { buildAgentPrompt } from "./prompt-builder.ts";
 import { selectModelTier } from "./model-selector.ts";
@@ -70,11 +72,16 @@ export interface ExecutionMetadata {
 // ── Agent Executor ───────────────────────────────────────────────────────────
 
 export class AgentExecutor {
+  private readonly logger: Logger;
+
   constructor(
     private readonly client: ClaudeClient,
     private readonly workspace: WorkspaceManager,
     private readonly config: ExecutorConfig,
-  ) {}
+    logger?: Logger,
+  ) {
+    this.logger = (logger ?? NULL_LOGGER).child({ module: "executor" });
+  }
 
   /**
    * Execute a task by loading its skill, building a prompt, calling Claude,
@@ -91,6 +98,12 @@ export class AgentExecutor {
     const signal = options?.signal;
     const budgetState = options?.budgetState;
     const modelTierOverride = options?.modelTierOverride;
+
+    this.logger.debug("executor_task_started", {
+      taskId: task.id,
+      skill: task.to,
+      status: task.status,
+    });
 
     try {
       return await this.executeInner(
@@ -183,6 +196,7 @@ export class AgentExecutor {
     // 2. Budget gate — reject if exhausted or if task priority is not allowed
     if (budgetState) {
       if (budgetState.level === "exhausted") {
+        this.logger.info("executor_budget_exhausted", { taskId: task.id });
         return this.failedResult(
           task,
           startTime,
@@ -195,6 +209,11 @@ export class AgentExecutor {
         );
       }
       if (!budgetState.allowedPriorities.includes(task.priority)) {
+        this.logger.info("executor_budget_priority_blocked", {
+          taskId: task.id,
+          priority: task.priority,
+          budgetLevel: budgetState.level,
+        });
         return this.failedResult(
           task,
           startTime,
@@ -212,7 +231,13 @@ export class AgentExecutor {
     let agentMeta;
     try {
       agentMeta = await loadSkillMeta(task.to, this.config.projectRoot);
+      this.logger.debug("executor_skill_loaded", { taskId: task.id, skill: task.to });
     } catch (err: unknown) {
+      this.logger.error("executor_skill_load_failed", {
+        taskId: task.id,
+        skill: task.to,
+        error: errorMessage(err),
+      });
       return this.failedResult(
         task,
         startTime,
@@ -229,6 +254,11 @@ export class AgentExecutor {
     // 4. Select model
     const modelTier = selectModelTier(task.to, budgetState, modelTierOverride);
     const model = MODEL_MAP[modelTier];
+    this.logger.debug("executor_model_selected", {
+      taskId: task.id,
+      modelTier,
+      model,
+    });
 
     // 5. Build prompt
     const prompt = await buildAgentPrompt(
@@ -265,6 +295,11 @@ export class AgentExecutor {
 
     try {
       // 7. Call Claude API
+      this.logger.debug("executor_api_call_started", {
+        taskId: task.id,
+        model,
+        maxTokens: this.config.defaultMaxTokens,
+      });
       const result = await this.client.createMessage({
         model,
         system: prompt.systemPrompt,
@@ -279,9 +314,22 @@ export class AgentExecutor {
       outputTokens = result.outputTokens;
       durationMs = result.durationMs;
 
+      this.logger.info("executor_api_call_completed", {
+        taskId: task.id,
+        model,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        durationMs: result.durationMs,
+        stopReason: result.stopReason,
+      });
+
       // 8. Detect truncation and retry once with format reminder
       if (result.stopReason !== "end_turn") {
         truncated = true;
+        this.logger.warn("executor_truncation_detected", {
+          taskId: task.id,
+          retrying: !signal?.aborted,
+        });
 
         // Skip retry if already aborted — keep partial content
         if (!signal?.aborted) {
@@ -352,6 +400,7 @@ export class AgentExecutor {
 
     // 10. Compute output path
     const outputPath = this.computeOutputPath(task);
+    this.logger.debug("executor_output_writing", { taskId: task.id, outputPath });
 
     // 11. Write output — EC-1: Handle foundation skill (null squad)
     try {
@@ -371,6 +420,10 @@ export class AgentExecutor {
         );
       }
     } catch (err: unknown) {
+      this.logger.error("executor_output_write_failed", {
+        taskId: task.id,
+        error: errorMessage(err),
+      });
       await this.safeUpdateStatus(task.id, "failed");
       return this.failedResult(
         task,
@@ -471,6 +524,7 @@ export class AgentExecutor {
       await this.workspace.updateTaskStatus(taskId, status);
     } catch {
       // Best-effort — don't let status update failure mask the original error
+      this.logger.warn("executor_status_update_failed", { taskId, targetStatus: status });
     }
   }
 

@@ -37,6 +37,8 @@ describe("Application interface contract", () => {
       queueManager: {} as any,
       costTracker: {} as any,
       logger: {} as any,
+      eventBus: {} as any,
+      scheduler: {} as any,
       async start() {},
       async shutdown() {},
     };
@@ -64,6 +66,8 @@ describe("Application interface contract", () => {
       } as any,
       costTracker: {} as any,
       logger: { info: () => {}, debug: () => {}, warn: () => {}, error: () => {} } as any,
+      eventBus: {} as any,
+      scheduler: {} as any,
       async start() {
         await this.queueManager.start();
       },
@@ -98,6 +102,8 @@ describe("Application interface contract", () => {
       } as any,
       costTracker: {} as any,
       logger: { info: () => {}, debug: () => {}, warn: () => {}, error: () => {} } as any,
+      eventBus: {} as any,
+      scheduler: {} as any,
       async start() {},
       async shutdown() {
         await (this.queueManager as any).stop();
@@ -124,6 +130,8 @@ describe("Application interface contract", () => {
       queueManager: { stop: async () => {} } as any,
       costTracker: {} as any,
       logger: { info: () => {}, debug: () => {}, warn: () => {}, error: () => {} } as any,
+      eventBus: {} as any,
+      scheduler: {} as any,
       async start() {},
       async shutdown() {
         if (shuttingDown) return;
