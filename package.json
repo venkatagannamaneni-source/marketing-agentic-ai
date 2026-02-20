@@ -1,6 +1,9 @@
 {
   "name": "marketing-agentic-ai",
   "module": "index.ts",
+  "scripts": {
+    "start": "bun run src/cli.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "pino-pretty": "^11.0.0"

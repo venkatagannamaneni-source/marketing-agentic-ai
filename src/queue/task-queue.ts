@@ -50,6 +50,11 @@ export class TaskQueueManager {
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
   private started = false;
 
+  // ── Metrics tracking for enhanced health checks ──────────────────────────
+  private readonly processingTimes: number[] = [];
+  private readonly enqueueTimestamps = new Map<string, number>();
+  private readonly workerLatencies: number[] = [];
+
   constructor(deps: TaskQueueManagerDeps) {
     this.config = { ...DEFAULT_TASK_QUEUE_CONFIG, ...deps.config };
     this.workspace = deps.workspace;
@@ -106,6 +111,7 @@ export class TaskQueueManager {
         removeOnComplete: { count: 100 },
         removeOnFail: false,
       });
+      this.enqueueTimestamps.set(task.id, Date.now());
       return "enqueued";
     } catch {
       // Redis likely down — fall back to file queue
@@ -232,13 +238,37 @@ export class TaskQueueManager {
       (jobCounts.prioritized ?? 0);
     const activeJobs = jobCounts.active ?? 0;
 
+    // Enhanced metrics
+    const avgWorkerLatencyMs =
+      this.workerLatencies.length > 0
+        ? this.workerLatencies.reduce((a, b) => a + b, 0) /
+          this.workerLatencies.length
+        : null;
+
+    const avgProcessingTimeMs =
+      this.processingTimes.length > 0
+        ? this.processingTimes.reduce((a, b) => a + b, 0) /
+          this.processingTimes.length
+        : null;
+
+    const p95ProcessingTimeMs =
+      this.processingTimes.length > 0
+        ? this.percentile(this.processingTimes, 95)
+        : null;
+
     return {
       redis: redisHealth,
       queue: {
         name: "task-queue",
         status: redisHealth.status === "healthy" ? "healthy" : "degraded",
         lastCheckedAt: now,
-        details: { jobCounts },
+        details: {
+          jobCounts,
+          avgWorkerLatencyMs,
+          avgProcessingTimeMs,
+          p95ProcessingTimeMs,
+          samplesCollected: this.processingTimes.length,
+        },
       },
       worker: {
         name: "worker",
@@ -263,7 +293,9 @@ export class TaskQueueManager {
     return failedJobs.map((job) => ({
       taskId: job.data.taskId,
       skill: job.data.skill,
-      failedAt: new Date().toISOString(),
+      failedAt: job.finishedOn
+        ? new Date(job.finishedOn).toISOString()
+        : new Date().toISOString(),
       attempts: job.attemptsMade,
       lastError: job.failedReason,
       originalPriority: job.data.priority,
@@ -287,8 +319,35 @@ export class TaskQueueManager {
   // ── Internal: Worker Event Wiring ───────────────────────────────────────
 
   private wireWorkerEvents(): void {
-    // On job completion: inspect routing action and re-enqueue if needed
+    // Track worker latency: time from enqueue to processing start
+    this.worker.on("active", (job: unknown) => {
+      if (!job || typeof job !== "object" || !("data" in job)) return;
+      const typedJob = job as { data: QueueJobData };
+      const enqueueTime = this.enqueueTimestamps.get(typedJob.data.taskId);
+      if (enqueueTime) {
+        this.workerLatencies.push(Date.now() - enqueueTime);
+        this.enqueueTimestamps.delete(typedJob.data.taskId);
+        // Keep only last 100 latency samples
+        if (this.workerLatencies.length > 100) {
+          this.workerLatencies.shift();
+        }
+      }
+    });
+
+    // On job completion: track processing time, inspect routing action and re-enqueue if needed
     this.worker.on("completed", async (_job: unknown, result: unknown) => {
+      // Track processing time from execution metadata
+      if (result && typeof result === "object") {
+        const jobResult = result as QueueJobResult;
+        const durationMs = jobResult.executionResult?.metadata?.durationMs;
+        if (typeof durationMs === "number" && durationMs > 0) {
+          this.processingTimes.push(durationMs);
+          // Keep only last 100 samples
+          if (this.processingTimes.length > 100) {
+            this.processingTimes.shift();
+          }
+        }
+      }
       if (!result || typeof result !== "object") return;
 
       const jobResult = result as QueueJobResult;
@@ -371,6 +430,21 @@ export class TaskQueueManager {
     if (this.redis.isConnected()) {
       await this.drainFallbackQueue();
     }
+
+    // Clean stale enqueue timestamps (jobs that never became active)
+    const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+    const now = Date.now();
+    for (const [taskId, timestamp] of this.enqueueTimestamps) {
+      if (now - timestamp > STALE_THRESHOLD_MS) {
+        this.enqueueTimestamps.delete(taskId);
+      }
+    }
+  }
+
+  private percentile(values: number[], p: number): number {
+    const sorted = [...values].sort((a, b) => a - b);
+    const index = Math.ceil((p / 100) * sorted.length) - 1;
+    return sorted[Math.max(0, index)]!;
   }
 
   private async drainFallbackQueue(): Promise<void> {

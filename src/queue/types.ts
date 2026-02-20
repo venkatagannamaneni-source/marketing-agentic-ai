@@ -127,6 +127,7 @@ export interface FailedJob {
   readonly data: QueueJobData;
   readonly failedReason: string;
   readonly attemptsMade: number;
+  readonly finishedOn?: number;
   retry(): Promise<void>;
 }
 
