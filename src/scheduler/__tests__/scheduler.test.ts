@@ -533,7 +533,8 @@ describe("Scheduler state persistence", () => {
     const state = await ctx.workspace.readScheduleState("test-schedule");
     expect(state).not.toBeNull();
     expect(state!.scheduleId).toBe("test-schedule");
-    expect(state!.lastFiredAt).toBe("2026-02-16T06:00:00.000Z");
+    // Use dynamic ISO string to avoid timezone-dependent assertion
+    expect(state!.lastFiredAt).toBe(new Date(2026, 1, 16, 6, 0).toISOString());
     expect(state!.fireCount).toBe(1);
     expect(state!.lastSkipReason).toBeNull();
 
@@ -560,9 +561,10 @@ describe("Scheduler state persistence", () => {
 
   it("restores state from workspace on start", async () => {
     // Pre-persist state
+    const persistedFiredAt = new Date(2026, 1, 15, 6, 0).toISOString();
     await ctx.workspace.writeScheduleState("test-schedule", {
       scheduleId: "test-schedule",
-      lastFiredAt: "2026-02-15T06:00:00.000Z",
+      lastFiredAt: persistedFiredAt,
       lastSkipReason: null,
       fireCount: 10,
     });
@@ -575,7 +577,7 @@ describe("Scheduler state persistence", () => {
     const state = states.get("test-schedule");
     expect(state).toBeDefined();
     expect(state!.fireCount).toBe(10);
-    expect(state!.lastFiredAt).toBe("2026-02-15T06:00:00.000Z");
+    expect(state!.lastFiredAt).toBe(persistedFiredAt);
 
     await scheduler.stop();
   });
@@ -600,7 +602,8 @@ describe("Scheduler catch-up", () => {
 
     await ctx.workspace.writeScheduleState("daily-test", {
       scheduleId: "daily-test",
-      lastFiredAt: "2026-02-15T06:00:00.000Z",
+      // Use dynamic ISO string to stay timezone-safe
+      lastFiredAt: new Date(2026, 1, 15, 6, 0).toISOString(),
       lastSkipReason: null,
       fireCount: 5,
     });
@@ -630,7 +633,7 @@ describe("Scheduler catch-up", () => {
 
     await ctx.workspace.writeScheduleState("daily-test", {
       scheduleId: "daily-test",
-      lastFiredAt: "2026-02-16T06:00:00.000Z",
+      lastFiredAt: new Date(2026, 1, 16, 6, 0).toISOString(),
       lastSkipReason: null,
       fireCount: 5,
     });
@@ -658,7 +661,7 @@ describe("Scheduler catch-up", () => {
 
     await ctx.workspace.writeScheduleState("daily-test", {
       scheduleId: "daily-test",
-      lastFiredAt: "2026-02-14T06:00:00.000Z",
+      lastFiredAt: new Date(2026, 1, 14, 6, 0).toISOString(),
       lastSkipReason: null,
       fireCount: 3,
     });
@@ -833,7 +836,7 @@ describe("Scheduler tick result", () => {
     await scheduler.start([]);
 
     const result = await scheduler.tick();
-    expect(result.timestamp).toBe("2026-02-16T06:00:00.000Z");
+    expect(result.timestamp).toBe(new Date(2026, 1, 16, 6, 0).toISOString());
 
     await scheduler.stop();
   });
@@ -850,6 +853,186 @@ describe("Scheduler tick result", () => {
     expect(result.fired).toContain("active");
     expect(result.skipped.find((s) => s.id === "disabled")).toBeDefined();
     expect(result.skipped.find((s) => s.id === "disabled")?.reason).toBe("disabled");
+
+    await scheduler.stop();
+  });
+});
+
+// ── getNextFiring ─────────────────────────────────────────────────────────
+
+describe("Scheduler getNextFiring", () => {
+  let ctx: SchedulerTestContext;
+
+  beforeEach(async () => {
+    ctx = await createSchedulerTestContext();
+  });
+
+  afterEach(async () => {
+    await ctx.cleanup();
+  });
+
+  it("returns null for unknown schedule ID", async () => {
+    const scheduler = new Scheduler(ctx.deps);
+    await scheduler.start([]);
+    expect(scheduler.getNextFiring("nonexistent")).toBeNull();
+    await scheduler.stop();
+  });
+
+  it("returns null for disabled schedule", async () => {
+    const scheduler = new Scheduler(ctx.deps);
+    const entry = createTestScheduleEntry({ cron: "0 6 * * *", enabled: false });
+    await scheduler.start([entry]);
+    expect(scheduler.getNextFiring("test-schedule")).toBeNull();
+    await scheduler.stop();
+  });
+
+  it("finds next daily firing", async () => {
+    // Clock at Monday 10:00 — next 6 AM is Tuesday 6:00
+    ctx.clock.now = new Date(2026, 1, 16, 10, 0);
+    const scheduler = new Scheduler(ctx.deps);
+    const entry = createTestScheduleEntry({ cron: "0 6 * * *" });
+    await scheduler.start([entry]);
+
+    const next = scheduler.getNextFiring("test-schedule");
+    expect(next).not.toBeNull();
+    expect(next!.getDate()).toBe(17);
+    expect(next!.getHours()).toBe(6);
+    expect(next!.getMinutes()).toBe(0);
+    await scheduler.stop();
+  });
+
+  it("finds next firing later same day", async () => {
+    // Clock at Monday 5:00 — next 6 AM is today at 6:00
+    ctx.clock.now = new Date(2026, 1, 16, 5, 0);
+    const scheduler = new Scheduler(ctx.deps);
+    const entry = createTestScheduleEntry({ cron: "0 6 * * *" });
+    await scheduler.start([entry]);
+
+    const next = scheduler.getNextFiring("test-schedule");
+    expect(next).not.toBeNull();
+    expect(next!.getDate()).toBe(16);
+    expect(next!.getHours()).toBe(6);
+    expect(next!.getMinutes()).toBe(0);
+    await scheduler.stop();
+  });
+
+  it("finds next weekly firing", async () => {
+    // Clock at Tuesday Feb 17 — next Monday is Feb 23
+    ctx.clock.now = new Date(2026, 1, 17, 12, 0);
+    const scheduler = new Scheduler(ctx.deps);
+    const entry = createTestScheduleEntry({ cron: "0 0 * * 1" });
+    await scheduler.start([entry]);
+
+    const next = scheduler.getNextFiring("test-schedule");
+    expect(next).not.toBeNull();
+    expect(next!.getDay()).toBe(1); // Monday
+    expect(next!.getHours()).toBe(0);
+    await scheduler.stop();
+  });
+
+  it("finds next monthly firing", async () => {
+    // Clock at Feb 20 — next 1st is March 1
+    ctx.clock.now = new Date(2026, 1, 20, 12, 0);
+    const scheduler = new Scheduler(ctx.deps);
+    const entry = createTestScheduleEntry({ cron: "0 0 1 * *" });
+    await scheduler.start([entry]);
+
+    const next = scheduler.getNextFiring("test-schedule");
+    expect(next).not.toBeNull();
+    expect(next!.getMonth()).toBe(2); // March
+    expect(next!.getDate()).toBe(1);
+    await scheduler.stop();
+  });
+});
+
+// ── Edge Cases ────────────────────────────────────────────────────────────
+
+describe("Scheduler edge cases", () => {
+  let ctx: SchedulerTestContext;
+
+  beforeEach(async () => {
+    ctx = await createSchedulerTestContext();
+  });
+
+  afterEach(async () => {
+    await ctx.cleanup();
+  });
+
+  it("addSchedule with duplicate ID replaces existing", async () => {
+    ctx.clock.now = new Date(2026, 1, 16, 6, 0);
+    const scheduler = new Scheduler(ctx.deps);
+    await scheduler.start([
+      createTestScheduleEntry({ cron: "0 6 * * *", pipelineId: "Content Production" }),
+    ]);
+
+    // Replace with a non-matching cron
+    scheduler.addSchedule(
+      createTestScheduleEntry({ cron: "0 12 * * *", pipelineId: "SEO Cycle" }),
+    );
+
+    // Should not fire at 6:00 (old cron), since it was replaced
+    const result = await scheduler.tick();
+    expect(result.fired).toHaveLength(0);
+
+    // Should fire at 12:00
+    ctx.clock.now = new Date(2026, 1, 16, 12, 0);
+    scheduler.markCompleted("test-schedule");
+    const result2 = await scheduler.tick();
+    expect(result2.fired).toContain("test-schedule");
+
+    await scheduler.stop();
+  });
+
+  it("removeSchedule for non-existent ID is a no-op", async () => {
+    const scheduler = new Scheduler(ctx.deps);
+    await scheduler.start([]);
+    scheduler.removeSchedule("nonexistent"); // should not throw
+    expect(scheduler.getAllSchedules()).toHaveLength(0);
+    await scheduler.stop();
+  });
+
+  it("setEnabled for non-existent ID is a no-op", async () => {
+    const scheduler = new Scheduler(ctx.deps);
+    await scheduler.start([]);
+    scheduler.setEnabled("nonexistent", true); // should not throw
+    await scheduler.stop();
+  });
+
+  it("markCompleted for non-existent ID is a no-op", async () => {
+    const scheduler = new Scheduler(ctx.deps);
+    await scheduler.start([]);
+    scheduler.markCompleted("nonexistent"); // should not throw
+    await scheduler.stop();
+  });
+
+  it("tick with no schedules returns empty result", async () => {
+    ctx.clock.now = new Date(2026, 1, 16, 6, 0);
+    const scheduler = new Scheduler(ctx.deps);
+    await scheduler.start([]);
+
+    const result = await scheduler.tick();
+    expect(result.fired).toHaveLength(0);
+    expect(result.skipped).toHaveLength(0);
+
+    await scheduler.stop();
+  });
+
+  it("schedule without priority defaults to P2 for budget check", async () => {
+    ctx.clock.now = new Date(2026, 1, 16, 6, 0);
+    ctx.budget.state = createTestBudgetState("throttle"); // allows P0, P1 only
+    const scheduler = new Scheduler(ctx.deps);
+    // Entry without explicit priority (defaults to P2)
+    const entry = createTestScheduleEntry({
+      cron: "0 6 * * *",
+      priority: undefined,
+    });
+    await scheduler.start([entry]);
+
+    const result = await scheduler.tick();
+    expect(result.fired).toHaveLength(0);
+    expect(result.skipped.find((s) => s.id === "test-schedule")?.reason).toBe(
+      "budget_throttle",
+    );
 
     await scheduler.stop();
   });

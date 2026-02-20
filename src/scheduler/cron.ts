@@ -218,6 +218,13 @@ function parsePositiveInt(
 
 /**
  * Check whether a given Date matches a parsed cron schedule.
+ *
+ * NOTE: dayOfMonth and dayOfWeek are combined with AND (both must match).
+ * Standard cron uses OR when both are non-wildcard. This implementation
+ * does not track wildcard status, so expressions like "0 0 1 * 5"
+ * would only fire when the 1st falls on a Friday. The 6 default schedules
+ * always use wildcard (*) for one of the two fields, so this does not
+ * affect actual system behavior.
  */
 export function cronMatches(fields: CronFields, date: Date): boolean {
   const minute = date.getMinutes();
