@@ -240,3 +240,38 @@ export {
   createWorkerProcessor,
   TaskQueueManager,
 } from "./queue/index.ts";
+
+// ── BullMQ Adapters ─────────────────────────────────────────────────────────
+export {
+  BullMQQueueAdapter,
+  BullMQWorkerAdapter,
+  type BullMQConnectionOptions,
+} from "./queue/bullmq-adapter.ts";
+
+// ── Config ──────────────────────────────────────────────────────────────────
+export {
+  loadConfig,
+  ConfigError,
+  type RuntimeConfig,
+} from "./config.ts";
+
+// ── Bootstrap ───────────────────────────────────────────────────────────────
+export {
+  bootstrap,
+  type Application,
+} from "./bootstrap.ts";
+
+// ── Runtime ─────────────────────────────────────────────────────────────────
+export {
+  runGoal,
+  inferCategory,
+  type GoalRunOptions,
+  type GoalResult,
+  type GoalResultStatus,
+} from "./runtime/run-goal.ts";
+
+// ── CLI ─────────────────────────────────────────────────────────────────────
+export {
+  parseArgs,
+  type ParsedArgs,
+} from "./cli.ts";
