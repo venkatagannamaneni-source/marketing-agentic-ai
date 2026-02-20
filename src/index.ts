@@ -27,6 +27,7 @@ export type {
   EventType,
   SystemEvent,
   ScheduleEntry,
+  ScheduleState,
   SystemState,
   DegradationLevel,
   ComponentStatus,
@@ -240,6 +241,22 @@ export {
   createWorkerProcessor,
   TaskQueueManager,
 } from "./queue/index.ts";
+
+// ── Scheduler ───────────────────────────────────────────────────────────────
+export {
+  Scheduler,
+  DEFAULT_SCHEDULER_CONFIG,
+  type SchedulerConfig,
+  type SchedulerDeps,
+  type TickResult,
+  type SkipEntry,
+  parseCron,
+  cronMatches,
+  previousCronMatch,
+  CronParseError,
+  type CronFields,
+  DEFAULT_SCHEDULES,
+} from "./scheduler/index.ts";
 
 // ── BullMQ Adapters ─────────────────────────────────────────────────────────
 export {

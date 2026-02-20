@@ -29,6 +29,9 @@ export interface SystemEvent {
 
 // ── Schedule Entry ───────────────────────────────────────────────────────────
 
+import type { Priority } from "./task.ts";
+import type { GoalCategory } from "./goal.ts";
+
 export interface ScheduleEntry {
   readonly id: string;
   readonly name: string;
@@ -36,4 +39,15 @@ export interface ScheduleEntry {
   readonly pipelineId: string;
   readonly enabled: boolean;
   readonly description: string;
+  readonly priority?: Priority;
+  readonly goalCategory?: GoalCategory;
+}
+
+// ── Schedule State (persisted operational data) ─────────────────────────────
+
+export interface ScheduleState {
+  readonly scheduleId: string;
+  readonly lastFiredAt: string | null;
+  readonly lastSkipReason: string | null;
+  readonly fireCount: number;
 }

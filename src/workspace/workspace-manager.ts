@@ -6,6 +6,7 @@ import { validateTransition } from "../types/task.ts";
 import type { Review } from "../types/review.ts";
 import type { Goal, GoalPlan } from "../types/goal.ts";
 import type { HumanReviewItem, HumanReviewFilter } from "../types/human-review.ts";
+import type { ScheduleState } from "../types/events.ts";
 import type { SkillName, SquadName } from "../types/agent.ts";
 import { SKILL_NAMES, SKILL_SQUAD_MAP, SQUAD_NAMES } from "../types/agent.ts";
 import { WORKSPACE_DIRS } from "../types/workspace.ts";
@@ -92,6 +93,11 @@ export interface WorkspaceManager {
     reviewId: string,
     updates: Partial<Pick<HumanReviewItem, "status" | "feedback" | "resolvedAt">>,
   ): Promise<void>;
+
+  // Schedule state operations
+  writeScheduleState(scheduleId: string, state: ScheduleState): Promise<void>;
+  readScheduleState(scheduleId: string): Promise<ScheduleState | null>;
+  listScheduleStates(): Promise<ScheduleState[]>;
 }
 
 // ── Path Builder ─────────────────────────────────────────────────────────────
@@ -120,6 +126,9 @@ export function createWorkspacePaths(rootDir: string): WorkspacePaths {
     goals: `${rootDir}/goals`,
     goalFile: (goalId: string) => `${rootDir}/goals/${goalId}.md`,
     goalPlanFile: (goalId: string) => `${rootDir}/goals/${goalId}-plan.md`,
+    schedules: `${rootDir}/schedules`,
+    scheduleStateFile: (scheduleId: string) =>
+      `${rootDir}/schedules/${scheduleId}-state.json`,
   };
 }
 
@@ -526,6 +535,58 @@ export class FileSystemWorkspaceManager implements WorkspaceManager {
     } finally {
       await lock.release();
     }
+  }
+
+  // ── Schedule State Operations ──────────────────────────────────────────
+
+  async writeScheduleState(
+    scheduleId: string,
+    state: ScheduleState,
+  ): Promise<void> {
+    const content = JSON.stringify(state, null, 2);
+    await this.writeFile(`schedules/${scheduleId}-state.json`, content);
+  }
+
+  async readScheduleState(
+    scheduleId: string,
+  ): Promise<ScheduleState | null> {
+    try {
+      const content = await this.readFile(
+        `schedules/${scheduleId}-state.json`,
+      );
+      return JSON.parse(content) as ScheduleState;
+    } catch (err: unknown) {
+      if (err instanceof WorkspaceError && err.code === "NOT_FOUND") {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  async listScheduleStates(): Promise<ScheduleState[]> {
+    const absPath = this.resolveSafe("schedules");
+    let entries: string[];
+    try {
+      entries = await readdir(absPath);
+    } catch (err: unknown) {
+      if (isErrnoException(err) && err.code === "ENOENT") {
+        return [];
+      }
+      throw err;
+    }
+
+    const states: ScheduleState[] = [];
+    for (const entry of entries) {
+      if (entry.endsWith("-state.json")) {
+        try {
+          const content = await this.readFile(`schedules/${entry}`);
+          states.push(JSON.parse(content) as ScheduleState);
+        } catch {
+          // Skip malformed state files
+        }
+      }
+    }
+    return states;
   }
 
   // ── Path Safety ─────────────────────────────────────────────────────────
