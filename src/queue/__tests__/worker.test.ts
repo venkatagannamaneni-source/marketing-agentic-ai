@@ -8,13 +8,29 @@ import { FailureTracker } from "../failure-tracker.ts";
 import { CompletionRouter } from "../completion-router.ts";
 import { FileSystemWorkspaceManager } from "../../workspace/workspace-manager.ts";
 import { MarketingDirector } from "../../director/director.ts";
-import { AgentExecutor } from "../../executor/agent-executor.ts";
-import { MockClaudeClient } from "../../executor/claude-client.ts";
-import { createDefaultConfig } from "../../executor/types.ts";
+import { AgentExecutor } from "../../agents/executor.ts";
+import type { ExecutorConfig } from "../../agents/executor.ts";
+import type { ClaudeClient, ClaudeMessageParams, ClaudeMessageResult } from "../../agents/claude-client.ts";
 import { createTestTask, createTestBudgetState, createTestJobData } from "./helpers.ts";
 import type { SkillName } from "../../types/agent.ts";
 import type { BudgetState } from "../../director/types.ts";
 import type { ProcessorFn } from "../types.ts";
+
+function createMockClaudeClient(error?: Error): ClaudeClient {
+  return {
+    async createMessage(params: ClaudeMessageParams): Promise<ClaudeMessageResult> {
+      if (error) throw error;
+      return {
+        content: "Mock output for task",
+        model: "claude-sonnet-4-5-20250929",
+        inputTokens: 100,
+        outputTokens: 200,
+        stopReason: "end_turn",
+        durationMs: 100,
+      };
+    },
+  };
+}
 
 describe("createWorkerProcessor", () => {
   let tempDir: string;
@@ -34,8 +50,15 @@ describe("createWorkerProcessor", () => {
     failureTracker = new FailureTracker(3);
     completionRouter = new CompletionRouter(workspace, director);
 
-    const mockClient = new MockClaudeClient();
-    const config = createDefaultConfig({ projectRoot: process.cwd() });
+    const mockClient = createMockClaudeClient();
+    const config: ExecutorConfig = {
+      projectRoot: process.cwd(),
+      defaultModel: "sonnet",
+      defaultTimeoutMs: 120_000,
+      defaultMaxTokens: 8192,
+      maxRetries: 0,
+      maxContextTokens: 150_000,
+    };
     executor = new AgentExecutor(mockClient, workspace, config);
 
     budgetState = createTestBudgetState("normal");
@@ -128,13 +151,29 @@ describe("createWorkerProcessor", () => {
 
   describe("execution failure", () => {
     it("throws TaskExecutionError and records failure", async () => {
-      // Create a task with a skill that won't load (to trigger executor failure)
+      // Create a processor with a failing Claude client to trigger executor failure
+      const failingClient = createMockClaudeClient(new Error("API connection failed"));
+      const failingConfig: ExecutorConfig = {
+        projectRoot: process.cwd(),
+        defaultModel: "sonnet",
+        defaultTimeoutMs: 120_000,
+        defaultMaxTokens: 8192,
+        maxRetries: 0,
+        maxContextTokens: 150_000,
+      };
+      const failingExecutor = new AgentExecutor(failingClient, workspace, failingConfig);
+      const failingProcessor = createWorkerProcessor({
+        workspace,
+        executor: failingExecutor,
+        budgetProvider: () => budgetState,
+        failureTracker,
+        completionRouter,
+      });
+
       const task = createTestTask({
         to: "copywriting" as SkillName,
         status: "pending",
         next: { type: "complete" },
-        // Use non-existent input to force failure
-        inputs: [{ path: "nonexistent/file.md", description: "missing" }],
       });
       await workspace.writeTask(task);
 
@@ -145,7 +184,7 @@ describe("createWorkerProcessor", () => {
       };
 
       try {
-        await processor(job);
+        await failingProcessor(job);
         expect.unreachable("Should have thrown");
       } catch (err) {
         expect(err).toBeInstanceOf(TaskExecutionError);

@@ -9,7 +9,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import type { E2EContext } from "./helpers.ts";
 import { bootstrapE2E, generateMockOutput } from "./helpers.ts";
-import type { ClaudeRequest } from "../../executor/types.ts";
 
 describe("E2E: Pipeline Execution", () => {
   let ctx: E2EContext;
@@ -115,13 +114,12 @@ describe("E2E: Pipeline Execution", () => {
     // Track what each pipeline call receives as user message
     const receivedMessages: string[] = [];
     ctx = await bootstrapE2E({
-      pipelineClientGenerator: (request: ClaudeRequest) => {
-        receivedMessages.push(request.userMessage);
+      pipelineClientGenerator: (params) => {
+        receivedMessages.push(
+          typeof params.messages[0]?.content === 'string' ? params.messages[0].content : '',
+        );
         return {
           content: generateMockOutput("agent", "task"),
-          inputTokens: 100,
-          outputTokens: 200,
-          stopReason: "end_turn",
         };
       },
     });

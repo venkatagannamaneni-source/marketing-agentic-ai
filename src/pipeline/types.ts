@@ -1,6 +1,6 @@
 import type { PipelineStep, PipelineRun } from "../types/pipeline.ts";
 import type { Task, Priority } from "../types/task.ts";
-import type { ExecutionResult } from "../executor/types.ts";
+import type { ExecutionResult } from "../agents/executor.ts";
 
 // ── Pipeline Error ──────────────────────────────────────────────────────────
 

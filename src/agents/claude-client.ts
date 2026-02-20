@@ -33,17 +33,26 @@ export interface ClaudeMessageResult {
 // ── Error ────────────────────────────────────────────────────────────────────
 
 export type ExecutionErrorCode =
-  | "RATE_LIMITED"
+  // Skill/input resolution
+  | "SKILL_NOT_FOUND"
+  | "INPUT_NOT_FOUND"
+  // API errors
   | "API_ERROR"
+  | "RATE_LIMITED"
   | "TIMEOUT"
+  | "API_OVERLOADED"
+  // Response issues
+  | "RESPONSE_EMPTY"
   | "TRUNCATED"
   | "MALFORMED_OUTPUT"
+  // Budget/execution gating
   | "BUDGET_EXHAUSTED"
   | "TASK_NOT_EXECUTABLE"
-  | "ABORTED"
-  | "SKILL_NOT_FOUND"
-  | "RESPONSE_EMPTY"
+  // Workspace
   | "WORKSPACE_WRITE_FAILED"
+  // Cancellation
+  | "ABORTED"
+  // Catch-all
   | "UNKNOWN";
 
 export class ExecutionError extends Error {
@@ -52,6 +61,7 @@ export class ExecutionError extends Error {
   constructor(
     message: string,
     readonly code: ExecutionErrorCode,
+    readonly taskId: string,
     readonly retryable: boolean,
     override readonly cause?: Error,
   ) {
@@ -231,6 +241,7 @@ function toExecutionError(
       return new ExecutionError(
         `Rate limited after max retries: ${message}`,
         "RATE_LIMITED",
+        "",
         false,
         cause,
       );
@@ -238,6 +249,7 @@ function toExecutionError(
       return new ExecutionError(
         `Server error after max retries: ${message}`,
         "API_ERROR",
+        "",
         false,
         cause,
       );
@@ -245,10 +257,11 @@ function toExecutionError(
       return new ExecutionError(
         `Request timed out: ${message}`,
         "TIMEOUT",
+        "",
         false,
         cause,
       );
     case "non_retryable":
-      return new ExecutionError(message, "API_ERROR", false, cause);
+      return new ExecutionError(message, "API_ERROR", "", false, cause);
   }
 }

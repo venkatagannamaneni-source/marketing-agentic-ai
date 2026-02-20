@@ -261,7 +261,7 @@ export class MarketingDirector {
       this.workspace,
       this.executorConfig,
     );
-    const execution = await executor.executeTask(task, budgetState);
+    const execution = await executor.executeOrThrow(task, { budgetState });
 
     // Semantic review
     const existingReviews = await this.workspace.listReviews(taskId);

@@ -6,8 +6,8 @@ import type {
 } from "../types/pipeline.ts";
 import type { SkillName } from "../types/agent.ts";
 import type { Task } from "../types/task.ts";
-import type { ExecutionResult } from "../executor/types.ts";
-import type { AgentExecutor } from "../executor/agent-executor.ts";
+import type { ExecutionResult } from "../agents/executor.ts";
+import type { AgentExecutor } from "../agents/executor.ts";
 import type { PipelineFactory } from "../director/pipeline-factory.ts";
 import type { WorkspaceManager } from "../workspace/workspace-manager.ts";
 import type {
@@ -552,8 +552,8 @@ export class SequentialPipelineEngine {
     let output = 0;
     for (const step of stepResults) {
       for (const result of step.executionResults) {
-        input += result.tokensUsed.input;
-        output += result.tokensUsed.output;
+        input += result.metadata.inputTokens;
+        output += result.metadata.outputTokens;
       }
     }
     return { input, output, total: input + output };

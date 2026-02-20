@@ -1,7 +1,7 @@
 import type { Task, Priority } from "../../types/task.ts";
 import type { SkillName } from "../../types/agent.ts";
 import type { BudgetState, BudgetLevel } from "../../director/types.ts";
-import type { ExecutionResult } from "../../executor/types.ts";
+import type { ExecutionResult } from "../../agents/executor.ts";
 import type {
   QueueAdapter,
   QueueAddOptions,
@@ -276,13 +276,25 @@ export function createTestBudgetState(
 export function createTestExecutionResult(
   overrides?: Partial<ExecutionResult>,
 ): ExecutionResult {
+  const taskId = overrides?.taskId ?? "copywriting-20260219-abc123";
   return {
-    taskId: overrides?.taskId ?? "copywriting-20260219-abc123",
+    taskId,
     skill: (overrides?.skill ?? "copywriting") as SkillName,
     status: "completed",
-    outputPath: `outputs/creative/copywriting/${overrides?.taskId ?? "copywriting-20260219-abc123"}.md`,
-    tokensUsed: { input: 1000, output: 500, total: 1500 },
-    durationMs: 5000,
+    content: "",
+    outputPath: `outputs/creative/copywriting/${taskId}.md`,
+    metadata: {
+      model: "claude-sonnet-4-5-20250929",
+      modelTier: "sonnet",
+      inputTokens: 1000,
+      outputTokens: 500,
+      durationMs: 5000,
+      estimatedCost: 0.0105,
+      retryCount: 0,
+    },
+    truncated: false,
+    missingInputs: [],
+    warnings: [],
     ...overrides,
   };
 }

@@ -4,11 +4,14 @@ import { SequentialPipelineEngine } from "../pipeline-engine.ts";
 import { PipelineError } from "../types.ts";
 import type { StepResult, PipelineEngineConfig } from "../types.ts";
 import type { PipelineRun } from "../../types/pipeline.ts";
-import { AgentExecutor } from "../../executor/agent-executor.ts";
-import { MockClaudeClient } from "../../executor/claude-client.ts";
-import { createDefaultConfig } from "../../executor/types.ts";
-import { ExecutionError } from "../../executor/types.ts";
-import type { ExecutorConfig, ClaudeRequest } from "../../executor/types.ts";
+import { AgentExecutor } from "../../agents/executor.ts";
+import type { ExecutorConfig } from "../../agents/executor.ts";
+import { ExecutionError } from "../../agents/claude-client.ts";
+import type {
+  ClaudeClient,
+  ClaudeMessageParams,
+  ClaudeMessageResult,
+} from "../../agents/claude-client.ts";
 import { PipelineFactory } from "../../director/pipeline-factory.ts";
 import { PIPELINE_TEMPLATES } from "../../agents/registry.ts";
 import type { WorkspaceManager } from "../../workspace/workspace-manager.ts";
@@ -23,13 +26,56 @@ import {
   type TestWorkspace,
 } from "./helpers.ts";
 
+// ── Local MockClaudeClient ───────────────────────────────────────────────────
+
+class MockClaudeClient implements ClaudeClient {
+  readonly calls: ClaudeMessageParams[] = [];
+  private responseGenerator:
+    | ((params: ClaudeMessageParams) => Partial<ClaudeMessageResult>)
+    | null;
+
+  constructor(
+    responseGenerator?: (
+      params: ClaudeMessageParams,
+    ) => Partial<ClaudeMessageResult>,
+  ) {
+    this.responseGenerator = responseGenerator ?? null;
+  }
+
+  async createMessage(
+    params: ClaudeMessageParams,
+  ): Promise<ClaudeMessageResult> {
+    this.calls.push(params);
+    const defaults: ClaudeMessageResult = {
+      content: "Mock output for task",
+      model: "claude-sonnet-4-5-20250929",
+      inputTokens: 100,
+      outputTokens: 200,
+      stopReason: "end_turn",
+      durationMs: 100,
+    };
+    if (this.responseGenerator) {
+      return { ...defaults, ...this.responseGenerator(params) };
+    }
+    return defaults;
+  }
+}
+
 // ── Test Setup ──────────────────────────────────────────────────────────────
 
 const PROJECT_ROOT = resolve(import.meta.dir, "../../..");
 
+const executorConfig: ExecutorConfig = {
+  projectRoot: PROJECT_ROOT,
+  defaultModel: "sonnet",
+  defaultTimeoutMs: 10_000,
+  defaultMaxTokens: 8192,
+  maxRetries: 0,
+  maxContextTokens: 150_000,
+};
+
 let tw: TestWorkspace;
 let client: MockClaudeClient;
-let executorConfig: ExecutorConfig;
 let executor: AgentExecutor;
 let factory: PipelineFactory;
 let engine: SequentialPipelineEngine;
@@ -37,12 +83,6 @@ let engine: SequentialPipelineEngine;
 beforeEach(async () => {
   tw = await createTestWorkspace();
   client = new MockClaudeClient();
-  executorConfig = createDefaultConfig({
-    projectRoot: PROJECT_ROOT,
-    maxRetries: 0,
-    retryDelayMs: 10,
-    defaultTimeoutMs: 10_000,
-  });
   executor = new AgentExecutor(client, tw.workspace, executorConfig);
   factory = new PipelineFactory(PIPELINE_TEMPLATES);
   engine = new SequentialPipelineEngine(factory, executor, tw.workspace);
@@ -98,7 +138,10 @@ describe("SequentialPipelineEngine — happy path", () => {
     expect(client.calls).toHaveLength(2);
     const secondCall = client.calls[1]!;
     // The upstream output from content-strategy should be referenced in the prompt
-    expect(secondCall.userMessage).toContain("Output from previous pipeline step");
+    const userContent = secondCall.messages.find(
+      (m) => m.role === "user",
+    )?.content;
+    expect(userContent).toContain("content-strategy");
   });
 
   it("persists all tasks to workspace", async () => {
@@ -129,7 +172,7 @@ describe("SequentialPipelineEngine — happy path", () => {
   });
 
   it("aggregates token usage across all steps", async () => {
-    client = new MockClaudeClient(() => ({
+    client = new MockClaudeClient((_params: ClaudeMessageParams) => ({
       content: "Generated output",
       inputTokens: 100,
       outputTokens: 200,
@@ -248,16 +291,21 @@ describe("SequentialPipelineEngine — parallel step execution", () => {
     expect(client.calls).toHaveLength(4); // 1 + 2 + 1
     const lastCall = client.calls[3]!;
     // Both upstream outputs should appear in the copy-editing prompt
-    expect(lastCall.userMessage).toContain("Output from previous pipeline step");
+    const lastUserContent = lastCall.messages.find(
+      (m) => m.role === "user",
+    )?.content;
+    // Both upstream output paths should be referenced in input-file tags
+    expect(lastUserContent).toContain("copywriting");
+    expect(lastUserContent).toContain("social-content");
   });
 
   it("fails fast on first parallel sub-task failure", async () => {
     let callCount = 0;
-    client = new MockClaudeClient((req: ClaudeRequest) => {
+    client = new MockClaudeClient((_params: ClaudeMessageParams) => {
       callCount++;
       if (callCount === 3) {
         // 3rd call is 2nd parallel sub-task (1 sequential + 2 parallel, maxConcurrency=1)
-        throw new ExecutionError("API exploded", "API_ERROR", "");
+        throw new ExecutionError("API exploded", "API_ERROR", "", false);
       }
       return {
         content: "Generated output",
@@ -300,8 +348,8 @@ describe("SequentialPipelineEngine — parallel step execution", () => {
   });
 
   it("records all task IDs even when parallel execution fails immediately", async () => {
-    client = new MockClaudeClient((req: ClaudeRequest) => {
-      throw new ExecutionError("API exploded", "API_ERROR", "");
+    client = new MockClaudeClient((_params: ClaudeMessageParams) => {
+      throw new ExecutionError("API exploded", "API_ERROR", "", false);
     });
     executor = new AgentExecutor(client, tw.workspace, executorConfig);
     engine = new SequentialPipelineEngine(factory, executor, tw.workspace);
@@ -408,10 +456,10 @@ describe("SequentialPipelineEngine — review step handling", () => {
 describe("SequentialPipelineEngine — failure handling", () => {
   it("fails pipeline on agent execution failure (fail-fast)", async () => {
     let callCount = 0;
-    client = new MockClaudeClient(() => {
+    client = new MockClaudeClient((_params: ClaudeMessageParams) => {
       callCount++;
       if (callCount === 2) {
-        throw new ExecutionError("API error", "API_ERROR", "");
+        throw new ExecutionError("API error", "API_ERROR", "", false);
       }
       return {
         content: "Generated output",
@@ -474,7 +522,7 @@ describe("SequentialPipelineEngine — failure handling", () => {
 
   it("never throws from execute()", async () => {
     // Set up a broken mock client that throws unexpectedly
-    client = new MockClaudeClient(() => {
+    client = new MockClaudeClient((_params: ClaudeMessageParams) => {
       throw new Error("Unexpected catastrophic failure");
     });
     executor = new AgentExecutor(client, tw.workspace, executorConfig);
@@ -545,7 +593,7 @@ describe("SequentialPipelineEngine — cancellation", () => {
 
     // Abort after the first API call within the parallel step
     let callCount = 0;
-    client = new MockClaudeClient(() => {
+    client = new MockClaudeClient((_params: ClaudeMessageParams) => {
       callCount++;
       // After the 2nd call (1st parallel sub-task), abort
       if (callCount === 2) {
@@ -631,7 +679,7 @@ describe("SequentialPipelineEngine — Content Production integration", () => {
   });
 
   it("preserves truncation warnings from executor", async () => {
-    client = new MockClaudeClient(() => ({
+    client = new MockClaudeClient((_params: ClaudeMessageParams) => ({
       content: "Truncated output...",
       inputTokens: 100,
       outputTokens: 4096,
@@ -651,7 +699,8 @@ describe("SequentialPipelineEngine — Content Production integration", () => {
     // The execution result within the step should carry the truncation warning
     const execResult = result.stepResults[0]!.executionResults[0]!;
     expect(execResult.status).toBe("completed");
-    expect(execResult.error?.code).toBe("RESPONSE_TRUNCATED");
+    expect(execResult.truncated).toBe(true);
+    expect(execResult.warnings.length).toBeGreaterThan(0);
   });
 });
 
@@ -669,8 +718,8 @@ describe("SequentialPipelineEngine — edge cases", () => {
   });
 
   it("sets completedAt on failed pipeline", async () => {
-    client = new MockClaudeClient(() => {
-      throw new ExecutionError("API error", "API_ERROR", "");
+    client = new MockClaudeClient((_params: ClaudeMessageParams) => {
+      throw new ExecutionError("API error", "API_ERROR", "", false);
     });
     executor = new AgentExecutor(client, tw.workspace, executorConfig);
     engine = new SequentialPipelineEngine(factory, executor, tw.workspace);
@@ -800,8 +849,8 @@ describe("SequentialPipelineEngine — completedAt ordering (BUG 6)", () => {
 
   it("sets completedAt BEFORE onStatusChange fires on failure", async () => {
     let completedAtWhenNotified: string | null = null;
-    client = new MockClaudeClient(() => {
-      throw new ExecutionError("API error", "API_ERROR", "");
+    client = new MockClaudeClient((_params: ClaudeMessageParams) => {
+      throw new ExecutionError("API error", "API_ERROR", "", false);
     });
     executor = new AgentExecutor(client, tw.workspace, executorConfig);
     engine = new SequentialPipelineEngine(factory, executor, tw.workspace);
