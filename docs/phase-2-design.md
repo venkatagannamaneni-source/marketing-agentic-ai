@@ -416,38 +416,253 @@ In `createGoal()` and `decomposeGoal()`: read learnings matching goal category. 
 
 ---
 
-## Implementation Order
+## Parallel Session Execution Plan
+
+**Total: 9 sessions across 4 rounds. Max 3 sessions running in parallel.**
+
+Each session runs as its own Claude Code instance on a dedicated feature branch. Sessions within a round have **zero file overlap** — no merge conflicts.
+
+### Dependency Graph
 
 ```
-Week 1: P0 (executor consolidation) + WS5.1 (logger) + WS6.1 (learnings in prompts)
-         |-- P0 is the critical path blocker
-         |-- WS5.1 and WS6.1 are independent, can parallelize
-         +-- Run full test suite after P0
-
-Week 2: WS1.1-1.4 (config, bootstrap, CLI, BullMQ adapters) + WS5.2 (cost tracker)
-         |-- WS1 is sequential: config -> adapters -> bootstrap -> CLI
-         +-- WS5.2 can parallelize alongside WS1
-
-Week 3: WS1.5 (run loop) + WS3 (scheduler) + WS4 (event bus)
-         |-- All three depend on WS1 bootstrap being done
-         +-- All three are independent of each other, parallelize
-
-Week 4: WS2 (Docker Redis) + integration tests + WS5.3-5.4 (metrics, health)
-         |-- Real Redis needed for integration testing
-         +-- Full-stack E2E test validates Phase 2 complete
+ROUND 1 (3 parallel)          ROUND 2 (3 parallel)       ROUND 3 (2 parallel)    ROUND 4 (1)
++--------------+              +------------------+        +------------------+    +-----------+
+| A: P0 + P1   |------------>| D: WS1 + WS2     |------->| G: Integration   |--->| I: Smoke  |
+| Executor     |              | Entry point +    |        | Wiring + Logging |    | test +    |
+| consolidation|              | Real queue infra |        | + Barrel exports |    | docs      |
++--------------+              +------------------+        +------------------+    +-----------+
+                                                                  ^
++--------------+              +------------------+               |
+| B: WS5 core  |------------>| E: WS3           |---------------+
+| Observability|              | Scheduler        |
+| (new files)  |              +------------------+
++--------------+
+                              +------------------+
++--------------+              | F: WS4           |---------------+
+| C: WS6       |------------>| Event bus +      |
+| Memory system|              | Webhook          |
++--------------+              +------------------+
 ```
 
-### Parallelization Map
+---
 
-| Track A (Critical Path) | Track B (Independent) |
+### ROUND 1 — Foundation (3 parallel sessions, no dependencies)
+
+#### Session A: Executor Consolidation (P0 + P1)
+
+| | |
 |---|---|
-| P0: Executor consolidation | WS5.1: Structured logger |
-| WS1.1: Config system | WS6.1: Learnings in prompts |
-| WS1.4: BullMQ adapters | WS5.2: Cost tracker |
-| WS1.3: Bootstrap | WS6.2: Director learnings |
-| WS1.2: CLI entry point | WS3: Scheduler |
-| WS1.5: Goal run loop | WS4: Event bus |
-| Integration tests | WS5.3-5.4: Metrics + health |
+| **Branch** | `feat/p0-executor-consolidation` |
+| **Scope** | Migrate pipeline + queue from legacy to modern executor; deprecate `DEFAULT_MODEL_MAP` |
+
+**Files owned (exclusive):**
+- `src/agents/executor.ts` — add `outputPath` to `ExecutionResult`
+- `src/pipeline/pipeline-engine.ts` — switch to modern executor + adapt calls
+- `src/pipeline/types.ts` — update `ExecutionResult` import
+- `src/queue/worker.ts` — switch to modern executor
+- `src/queue/task-queue.ts` — update `TaskQueueManagerDeps` type
+- `src/executor/types.ts` — deprecate `DEFAULT_MODEL_MAP`
+- `src/__tests__/e2e/helpers.ts` — rewire bootstrap
+- `src/agents/claude-client.ts` — ensure `MODEL_MAP` exported
+
+**Verification:** `bun test` (938+ pass) + `bunx tsc --noEmit`
+
+#### Session B: Observability Core (WS5 — new files only)
+
+| | |
+|---|---|
+| **Branch** | `feat/observability-core` |
+| **Scope** | Create observability module. New files only — do NOT integrate logging into existing modules (conflicts with Session A's files) |
+
+**Files owned (exclusive):**
+- `src/observability/logger.ts` — NEW (pino wrapper)
+- `src/observability/cost-tracker.ts` — NEW (cost accumulation)
+- `src/observability/metrics.ts` — NEW (execution metrics)
+- `src/observability/health-monitor.ts` — NEW (system health)
+- `src/observability/index.ts` — NEW (barrel export)
+- `package.json` — add pino + pino-pretty
+
+#### Session C: Memory System (WS6)
+
+| | |
+|---|---|
+| **Branch** | `feat/memory-system` |
+| **Scope** | Agents read past learnings before execution; Director reads learnings before goal decomposition |
+
+**Files owned (exclusive):**
+- `src/agents/prompt-builder.ts` — include learnings in prompt
+- `src/director/director.ts` — read learnings before planning
+- `src/types/workspace.ts` — extend `LearningEntry`
+- `src/workspace/markdown.ts` — update serialization
+
+**Verification:** `bun test` (938+ pass) + `bunx tsc --noEmit`
+
+#### Round 1 Merge Order
+1. Session A (P0) first — most foundational
+2. Session C (WS6) second — extends types that Session B doesn't touch
+3. Session B (WS5 core) last — adds pino to package.json
+
+**Blocker for Round 2:** All 3 branches merged. P0 is the critical gate.
+
+---
+
+### ROUND 2 — Runtime Features (3 parallel sessions, depends on Round 1)
+
+#### Session D: Entry Point + Real Queue (WS1 + WS2)
+
+| | |
+|---|---|
+| **Branch** | `feat/runtime-entry-point` |
+| **Scope** | Config, bootstrap, CLI, BullMQ adapters, goal run loop, Docker Redis, health checks |
+
+**Files owned (exclusive):**
+- `src/config.ts` — NEW (runtime configuration)
+- `src/bootstrap.ts` — NEW (composition root)
+- `src/cli.ts` — NEW (CLI entry point)
+- `src/runtime/run-goal.ts` — NEW (goal execution loop)
+- `src/queue/bullmq-adapter.ts` — NEW (real BullMQ adapters)
+- `src/queue/task-queue.ts` — enhanced `getHealth()`
+- `docker-compose.yml` — NEW (Redis)
+
+#### Session E: Scheduler (WS3)
+
+| | |
+|---|---|
+| **Branch** | `feat/scheduler` |
+| **Scope** | Cron scheduler engine, default schedules, schedule persistence |
+
+**Files owned (exclusive):**
+- `src/scheduler/scheduler.ts` — NEW (cron engine)
+- `src/scheduler/default-schedules.ts` — NEW (schedule definitions)
+- `src/scheduler/index.ts` — NEW (barrel)
+- `src/types/workspace.ts` — add `schedules` to `WORKSPACE_DIRS` only (do NOT touch `LearningEntry`)
+- `src/workspace/workspace-manager.ts` — add schedule persistence
+
+#### Session F: Event Bus (WS4)
+
+| | |
+|---|---|
+| **Branch** | `feat/event-bus` |
+| **Scope** | Event bus core, default mappings, webhook HTTP receiver, internal emitters |
+
+**Files owned (exclusive):**
+- `src/events/event-bus.ts` — NEW (event processing)
+- `src/events/default-mappings.ts` — NEW (event mappings)
+- `src/events/webhook-server.ts` — NEW (webhook receiver)
+- `src/events/index.ts` — NEW (barrel)
+- `src/queue/budget-gate.ts` — add event emission
+- `src/queue/failure-tracker.ts` — add event emission
+
+#### Round 2 Merge Order
+1. Session D first — bootstrap needed by wiring in Round 3
+2. Session E second
+3. Session F third
+
+**Blocker for Round 3:** All 3 branches merged.
+
+---
+
+### ROUND 3 — Integration (2 parallel sessions, depends on Round 2)
+
+#### Session G: Wiring + Logging Integration + Barrel Exports
+
+| | |
+|---|---|
+| **Branch** | `feat/integration-wiring` |
+| **Scope** | Wire scheduler + event bus into bootstrap; integrate pino logger into all modules; update src/index.ts with all new exports |
+
+**Files owned:**
+- `src/bootstrap.ts` — wire scheduler + event bus
+- `src/index.ts` — add ALL new barrel exports
+- `src/queue/task-queue.ts` — add logger
+- `src/queue/worker.ts` — add logger
+- `src/director/director.ts` — add logger
+- `src/pipeline/pipeline-engine.ts` — add logger
+- `src/agents/executor.ts` — add logger
+- `src/agents/claude-client.ts` — add logger
+- `package.json` — add `start` script
+
+#### Session H: Integration Tests
+
+| | |
+|---|---|
+| **Branch** | `feat/integration-tests` |
+| **Scope** | Full-stack E2E tests (all new files, no conflicts with Session G) |
+
+**Files owned (exclusive — all new):**
+- `src/__tests__/integration/setup.ts` — infra detection
+- `src/__tests__/integration/real-redis.test.ts`
+- `src/__tests__/integration/full-stack.test.ts`
+- `src/__tests__/integration/scheduler.test.ts`
+- `src/__tests__/integration/event-bus.test.ts`
+
+#### Round 3 Merge Order
+1. Session G first — wiring must exist before integration tests validate it
+2. Session H second
+
+---
+
+### ROUND 4 — Validation (1 session, depends on Round 3)
+
+#### Session I: Smoke Test + Docs Update
+
+| | |
+|---|---|
+| **Branch** | `feat/phase2-validation` |
+| **Scope** | End-to-end smoke test, create phase-2-status.md, update CLAUDE.md |
+
+---
+
+### Summary Table
+
+| Round | Sessions | Parallel? | Branch Names | Blockers |
+|-------|----------|-----------|--------------|----------|
+| **1** | A, B, C | 3 parallel | `feat/p0-executor-consolidation`, `feat/observability-core`, `feat/memory-system` | None |
+| **2** | D, E, F | 3 parallel | `feat/runtime-entry-point`, `feat/scheduler`, `feat/event-bus` | Round 1 merged |
+| **3** | G, H | 2 parallel | `feat/integration-wiring`, `feat/integration-tests` | Round 2 merged |
+| **4** | I | 1 session | `feat/phase2-validation` | Round 3 merged |
+
+**Total: 9 sessions, 4 rounds, max 3 concurrent sessions**
+
+---
+
+### File Ownership Matrix (Conflict-Free Guarantee)
+
+No cell has two letters in the same round. Files used across rounds are safe because rounds are sequential.
+
+| Existing File | R1:A | R1:B | R1:C | R2:D | R2:E | R2:F | R3:G | R3:H |
+|---------------|------|------|------|------|------|------|------|------|
+| `src/agents/executor.ts` | **A** | | | | | | G | |
+| `src/agents/claude-client.ts` | **A** | | | | | | G | |
+| `src/agents/prompt-builder.ts` | | | **C** | | | | | |
+| `src/pipeline/pipeline-engine.ts` | **A** | | | | | | G | |
+| `src/pipeline/types.ts` | **A** | | | | | | | |
+| `src/queue/worker.ts` | **A** | | | | | | G | |
+| `src/queue/task-queue.ts` | **A** | | | **D** | | | G | |
+| `src/queue/budget-gate.ts` | | | | | | **F** | | |
+| `src/queue/failure-tracker.ts` | | | | | | **F** | | |
+| `src/director/director.ts` | | | **C** | | | | G | |
+| `src/executor/types.ts` | **A** | | | | | | | |
+| `src/types/workspace.ts` | | | **C** | | **E** | | | |
+| `src/workspace/markdown.ts` | | | **C** | | | | | |
+| `src/workspace/workspace-manager.ts` | | | | | **E** | | | |
+| `src/__tests__/e2e/helpers.ts` | **A** | | | | | | | |
+| `src/index.ts` | | | | | | | **G** | |
+| `package.json` | | **B** | | | | | **G** | |
+
+---
+
+### Merge Strategy
+
+**Between rounds:**
+1. Each session creates PR from feature branch to main
+2. CI gate: `bun test` + `bunx tsc --noEmit`
+3. Squash-merge in the order specified per round
+4. Next round branches from updated main
+
+**Within a round:** No coordination needed — file ownership is exclusive.
+
+**Handling `src/types/workspace.ts` (R1:C then R2:E):** Session C extends `LearningEntry` and merges first. Session E branches from main AFTER Round 1, so it sees the updated type and only adds `schedules` to `WORKSPACE_DIRS`.
 
 ---
 
