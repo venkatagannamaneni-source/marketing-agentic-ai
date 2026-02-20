@@ -1,3 +1,10 @@
+import type { SystemEvent } from "../types/events.ts";
+
+// ── Event Callback Type ────────────────────────────────────────────────────
+// Defined locally to avoid circular imports with src/events/event-bus.ts.
+
+type OnEventCallback = (event: SystemEvent) => void;
+
 // ── Failure Tracker ─────────────────────────────────────────────────────────
 // Tracks consecutive failures per pipeline to detect cascading failures.
 // When the threshold is reached, signals that the worker should pause.
@@ -6,8 +13,14 @@ const GLOBAL_KEY = "__global__";
 
 export class FailureTracker {
   private readonly consecutiveFailures = new Map<string, number>();
+  private readonly onEvent?: OnEventCallback;
 
-  constructor(private readonly cascadeThreshold: number = 3) {}
+  constructor(
+    private readonly cascadeThreshold: number = 3,
+    onEvent?: OnEventCallback,
+  ) {
+    this.onEvent = onEvent;
+  }
 
   /**
    * Record a task failure. Increments the consecutive failure count
@@ -16,7 +29,32 @@ export class FailureTracker {
   recordFailure(taskId: string, pipelineId: string | null): void {
     const key = pipelineId ?? GLOBAL_KEY;
     const current = this.consecutiveFailures.get(key) ?? 0;
-    this.consecutiveFailures.set(key, current + 1);
+    const newCount = current + 1;
+    this.consecutiveFailures.set(key, newCount);
+
+    // Emit agent_failure event
+    this.onEvent?.({
+      id: `agent-failure-${taskId}-${Date.now()}`,
+      type: "agent_failure",
+      timestamp: new Date().toISOString(),
+      source: "failure-tracker",
+      data: { taskId, pipelineId, consecutiveFailures: newCount },
+    });
+
+    // Emit pipeline_blocked when cascade threshold is exactly reached
+    if (newCount === this.cascadeThreshold) {
+      this.onEvent?.({
+        id: `pipeline-blocked-${key}-${Date.now()}`,
+        type: "pipeline_blocked",
+        timestamp: new Date().toISOString(),
+        source: "failure-tracker",
+        data: {
+          pipelineId,
+          consecutiveFailures: newCount,
+          threshold: this.cascadeThreshold,
+        },
+      });
+    }
   }
 
   /**
