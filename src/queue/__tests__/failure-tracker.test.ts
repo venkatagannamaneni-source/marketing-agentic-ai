@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { FailureTracker } from "../failure-tracker.ts";
+import type { SystemEvent } from "../../types/events.ts";
 
 describe("FailureTracker", () => {
   let tracker: FailureTracker;
@@ -142,6 +143,122 @@ describe("FailureTracker", () => {
       const custom = new FailureTracker(1);
       custom.recordFailure("t1", null);
       expect(custom.shouldPause()).toBe(true);
+    });
+  });
+
+  describe("event emission", () => {
+    it("emits agent_failure on each recordFailure call", () => {
+      const events: SystemEvent[] = [];
+      const trackerWithEvents = new FailureTracker(3, (e) => events.push(e));
+
+      trackerWithEvents.recordFailure("task-1", "pipe-a");
+
+      const agentFailures = events.filter((e) => e.type === "agent_failure");
+      expect(agentFailures).toHaveLength(1);
+      expect(agentFailures[0]!.source).toBe("failure-tracker");
+      expect(agentFailures[0]!.data.taskId).toBe("task-1");
+      expect(agentFailures[0]!.data.pipelineId).toBe("pipe-a");
+      expect(agentFailures[0]!.data.consecutiveFailures).toBe(1);
+    });
+
+    it("emits pipeline_blocked when cascade threshold reached", () => {
+      const events: SystemEvent[] = [];
+      const trackerWithEvents = new FailureTracker(3, (e) => events.push(e));
+
+      trackerWithEvents.recordFailure("t1", "pipe-a");
+      trackerWithEvents.recordFailure("t2", "pipe-a");
+      trackerWithEvents.recordFailure("t3", "pipe-a");
+
+      const blocked = events.filter((e) => e.type === "pipeline_blocked");
+      expect(blocked).toHaveLength(1);
+      expect(blocked[0]!.data.pipelineId).toBe("pipe-a");
+      expect(blocked[0]!.data.consecutiveFailures).toBe(3);
+      expect(blocked[0]!.data.threshold).toBe(3);
+    });
+
+    it("does not emit pipeline_blocked below threshold", () => {
+      const events: SystemEvent[] = [];
+      const trackerWithEvents = new FailureTracker(3, (e) => events.push(e));
+
+      trackerWithEvents.recordFailure("t1", "pipe-a");
+      trackerWithEvents.recordFailure("t2", "pipe-a");
+
+      const blocked = events.filter((e) => e.type === "pipeline_blocked");
+      expect(blocked).toHaveLength(0);
+    });
+
+    it("does not emit pipeline_blocked above threshold (only at exact threshold)", () => {
+      const events: SystemEvent[] = [];
+      const trackerWithEvents = new FailureTracker(3, (e) => events.push(e));
+
+      trackerWithEvents.recordFailure("t1", "pipe-a");
+      trackerWithEvents.recordFailure("t2", "pipe-a");
+      trackerWithEvents.recordFailure("t3", "pipe-a");
+      trackerWithEvents.recordFailure("t4", "pipe-a");
+
+      const blocked = events.filter((e) => e.type === "pipeline_blocked");
+      expect(blocked).toHaveLength(1); // Only at exact threshold, not again at 4
+    });
+
+    it("does not emit when no onEvent callback provided", () => {
+      const trackerNoCallback = new FailureTracker(3);
+
+      // Should not throw
+      trackerNoCallback.recordFailure("t1", null);
+      trackerNoCallback.recordFailure("t2", null);
+      trackerNoCallback.recordFailure("t3", null);
+    });
+
+    it("emitted agent_failure events have correct shape", () => {
+      const events: SystemEvent[] = [];
+      const trackerWithEvents = new FailureTracker(3, (e) => events.push(e));
+
+      trackerWithEvents.recordFailure("task-42", "pipe-x");
+
+      const event = events[0]!;
+      expect(typeof event.id).toBe("string");
+      expect(event.id.length).toBeGreaterThan(0);
+      expect(event.type).toBe("agent_failure");
+      expect(typeof event.timestamp).toBe("string");
+      expect(event.source).toBe("failure-tracker");
+      expect(event.data.taskId).toBe("task-42");
+      expect(event.data.pipelineId).toBe("pipe-x");
+    });
+
+    it("emits agent_failure for null pipelineId", () => {
+      const events: SystemEvent[] = [];
+      const trackerWithEvents = new FailureTracker(3, (e) => events.push(e));
+
+      trackerWithEvents.recordFailure("task-1", null);
+
+      const event = events[0]!;
+      expect(event.type).toBe("agent_failure");
+      expect(event.data.pipelineId).toBeNull();
+    });
+
+    it("emits pipeline_blocked with null pipelineId when global threshold reached", () => {
+      const events: SystemEvent[] = [];
+      const trackerWithEvents = new FailureTracker(2, (e) => events.push(e));
+
+      trackerWithEvents.recordFailure("t1", null);
+      trackerWithEvents.recordFailure("t2", null);
+
+      const blocked = events.filter((e) => e.type === "pipeline_blocked");
+      expect(blocked).toHaveLength(1);
+      expect(blocked[0]!.data.pipelineId).toBeNull();
+    });
+
+    it("produces unique event IDs across multiple calls in the same tick", () => {
+      const events: SystemEvent[] = [];
+      const trackerWithEvents = new FailureTracker(5, (e) => events.push(e));
+
+      trackerWithEvents.recordFailure("t1", "pipe-a");
+      trackerWithEvents.recordFailure("t2", "pipe-a");
+      trackerWithEvents.recordFailure("t3", "pipe-a");
+
+      expect(events).toHaveLength(3);
+      const ids = new Set(events.map((e) => e.id));
+      expect(ids.size).toBe(3);
     });
   });
 });

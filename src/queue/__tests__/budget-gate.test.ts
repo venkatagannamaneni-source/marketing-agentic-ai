@@ -3,6 +3,7 @@ import { BudgetGate } from "../budget-gate.ts";
 import { createTestTask, createTestBudgetState } from "./helpers.ts";
 import type { Priority } from "../../types/task.ts";
 import type { BudgetLevel } from "../../director/types.ts";
+import type { SystemEvent } from "../../types/events.ts";
 
 describe("BudgetGate", () => {
   const gate = new BudgetGate();
@@ -100,6 +101,109 @@ describe("BudgetGate", () => {
       const { allowed, deferred } = gate.filterBatch([], budget);
       expect(allowed).toHaveLength(0);
       expect(deferred).toHaveLength(0);
+    });
+  });
+
+  describe("event emission", () => {
+    it("emits budget_critical when budget is exhausted", () => {
+      const events: SystemEvent[] = [];
+      const gateWithEvents = new BudgetGate((e) => events.push(e));
+      const budget = createTestBudgetState("exhausted");
+      const task = createTestTask({ priority: "P0" });
+
+      gateWithEvents.check(task, budget);
+
+      expect(events).toHaveLength(1);
+      expect(events[0]!.type).toBe("budget_critical");
+      expect(events[0]!.source).toBe("budget-gate");
+    });
+
+    it("emits budget_warning when budget level is warning", () => {
+      const events: SystemEvent[] = [];
+      const gateWithEvents = new BudgetGate((e) => events.push(e));
+      const budget = createTestBudgetState("warning");
+      const task = createTestTask({ priority: "P0" });
+
+      gateWithEvents.check(task, budget);
+
+      expect(events).toHaveLength(1);
+      expect(events[0]!.type).toBe("budget_warning");
+    });
+
+    it("emits budget_warning when budget level is critical", () => {
+      const events: SystemEvent[] = [];
+      const gateWithEvents = new BudgetGate((e) => events.push(e));
+      const budget = createTestBudgetState("critical");
+      const task = createTestTask({ priority: "P0" });
+
+      gateWithEvents.check(task, budget);
+
+      expect(events).toHaveLength(1);
+      expect(events[0]!.type).toBe("budget_warning");
+    });
+
+    it("does not emit when no onEvent callback provided", () => {
+      const gateNoCallback = new BudgetGate();
+      const budget = createTestBudgetState("exhausted");
+      const task = createTestTask({ priority: "P0" });
+
+      // Should not throw
+      gateNoCallback.check(task, budget);
+    });
+
+    it("does not emit at normal budget level", () => {
+      const events: SystemEvent[] = [];
+      const gateWithEvents = new BudgetGate((e) => events.push(e));
+      const budget = createTestBudgetState("normal");
+      const task = createTestTask({ priority: "P0" });
+
+      gateWithEvents.check(task, budget);
+
+      expect(events).toHaveLength(0);
+    });
+
+    it("does not emit at throttle budget level for allowed priority", () => {
+      const events: SystemEvent[] = [];
+      const gateWithEvents = new BudgetGate((e) => events.push(e));
+      const budget = createTestBudgetState("throttle");
+      const task = createTestTask({ priority: "P0" });
+
+      gateWithEvents.check(task, budget);
+
+      expect(events).toHaveLength(0);
+    });
+
+    it("emitted event has correct shape", () => {
+      const events: SystemEvent[] = [];
+      const gateWithEvents = new BudgetGate((e) => events.push(e));
+      const budget = createTestBudgetState("exhausted");
+      const task = createTestTask({ priority: "P0" });
+
+      gateWithEvents.check(task, budget);
+
+      const event = events[0]!;
+      expect(typeof event.id).toBe("string");
+      expect(event.id.length).toBeGreaterThan(0);
+      expect(typeof event.timestamp).toBe("string");
+      expect(event.source).toBe("budget-gate");
+      expect(event.data.level).toBe("exhausted");
+      expect(event.data.percentUsed).toBe(100);
+      expect(event.data.spent).toBe(1000);
+      expect(event.data.totalBudget).toBe(1000);
+    });
+
+    it("produces unique event IDs across multiple calls in the same tick", () => {
+      const events: SystemEvent[] = [];
+      const gateWithEvents = new BudgetGate((e) => events.push(e));
+      const budget = createTestBudgetState("exhausted");
+
+      gateWithEvents.check(createTestTask({ priority: "P0" }), budget);
+      gateWithEvents.check(createTestTask({ priority: "P0" }), budget);
+      gateWithEvents.check(createTestTask({ priority: "P0" }), budget);
+
+      expect(events).toHaveLength(3);
+      const ids = new Set(events.map((e) => e.id));
+      expect(ids.size).toBe(3);
     });
   });
 });

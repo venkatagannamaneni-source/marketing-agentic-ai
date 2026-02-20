@@ -242,6 +242,27 @@ export {
   TaskQueueManager,
 } from "./queue/index.ts";
 
+// ── Events ──────────────────────────────────────────────────────────────────
+export {
+  EventBus,
+  DEFAULT_EVENT_MAPPINGS,
+  createWebhookServer,
+} from "./events/index.ts";
+
+export type {
+  EventMapping,
+  EventBusDeps,
+  EventBusDirector,
+  EventBusQueueManager,
+  EventBusLogger,
+  EmitResult,
+  EventEmitter,
+  WebhookEventBus,
+  WebhookServerConfig,
+  WebhookServer,
+  WebhookStats,
+} from "./events/index.ts";
+
 // ── Scheduler ───────────────────────────────────────────────────────────────
 export {
   Scheduler,

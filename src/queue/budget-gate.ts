@@ -1,5 +1,11 @@
 import type { Task } from "../types/task.ts";
 import type { BudgetState } from "../director/types.ts";
+import type { SystemEvent } from "../types/events.ts";
+
+// ── Event Callback Type ────────────────────────────────────────────────────
+// Defined locally to avoid circular imports with src/events/event-bus.ts.
+
+type OnEventCallback = (event: SystemEvent) => void;
 
 // ── Budget Gate ─────────────────────────────────────────────────────────────
 // Checks if a task is allowed to execute given the current budget state.
@@ -7,7 +13,15 @@ import type { BudgetState } from "../director/types.ts";
 
 export type BudgetDecision = "allow" | "defer" | "block";
 
+let budgetEventSeq = 0;
+
 export class BudgetGate {
+  private readonly onEvent?: OnEventCallback;
+
+  constructor(onEvent?: OnEventCallback) {
+    this.onEvent = onEvent;
+  }
+
   /**
    * Check if a single task is allowed given current budget.
    * - "allow": task can proceed
@@ -16,10 +30,14 @@ export class BudgetGate {
    */
   check(task: Task, budget: BudgetState): BudgetDecision {
     if (budget.level === "exhausted") {
+      this.emitBudgetEvent("budget_critical", budget);
       return "block";
     }
 
     if (budget.allowedPriorities.includes(task.priority)) {
+      if (budget.level === "warning" || budget.level === "critical") {
+        this.emitBudgetEvent("budget_warning", budget);
+      }
       return "allow";
     }
 
@@ -46,5 +64,26 @@ export class BudgetGate {
     }
 
     return { allowed, deferred };
+  }
+
+  /**
+   * Emit a budget-related system event via the optional callback.
+   */
+  private emitBudgetEvent(
+    type: "budget_warning" | "budget_critical",
+    budget: BudgetState,
+  ): void {
+    this.onEvent?.({
+      id: `budget-${type}-${Date.now()}-${++budgetEventSeq}`,
+      type,
+      timestamp: new Date().toISOString(),
+      source: "budget-gate",
+      data: {
+        level: budget.level,
+        percentUsed: budget.percentUsed,
+        spent: budget.spent,
+        totalBudget: budget.totalBudget,
+      },
+    });
   }
 }
