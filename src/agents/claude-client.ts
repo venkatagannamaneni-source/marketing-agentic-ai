@@ -204,6 +204,7 @@ type ErrorClass =
   | "rate_limited"
   | "server_error"
   | "timeout"
+  | "aborted"
   | "non_retryable";
 
 function classifyError(err: unknown): ErrorClass {
@@ -220,9 +221,9 @@ function classifyError(err: unknown): ErrorClass {
     return "non_retryable";
   }
 
-  // Bun/Node timeout errors
+  // User-initiated abort (AbortSignal) — distinct from timeout
   if (err instanceof Error && err.name === "AbortError") {
-    return "timeout";
+    return "aborted";
   }
 
   return "non_retryable";
@@ -257,6 +258,14 @@ function toExecutionError(
       return new ExecutionError(
         `Request timed out: ${message}`,
         "TIMEOUT",
+        "",
+        false,
+        cause,
+      );
+    case "aborted":
+      return new ExecutionError(
+        `Request aborted: ${message}`,
+        "ABORTED",
         "",
         false,
         cause,

@@ -342,7 +342,7 @@ describe("AgentExecutor", () => {
         spent: 960,
         percentUsed: 96,
         level: "critical",
-        allowedPriorities: ["P0"],
+        allowedPriorities: ["P0", "P1", "P2"],
         modelOverride: "haiku",
       };
 
@@ -510,6 +510,188 @@ describe("AgentExecutor", () => {
       await executor.execute(task, { signal: controller.signal });
 
       expect(capturedSignal).toBe(controller.signal);
+    });
+
+    it("returns ABORTED immediately for pre-aborted signal", async () => {
+      const client = createMockClient();
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const controller = new AbortController();
+      controller.abort();
+      const result = await executor.execute(task, { signal: controller.signal });
+
+      expect(result.status).toBe("failed");
+      expect(result.error?.code).toBe("ABORTED");
+      expect(client.calls.length).toBe(0); // Should not have called the client
+    });
+  });
+
+  describe("executeOrThrow", () => {
+    it("returns result on success", async () => {
+      const client = createMockClient();
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.executeOrThrow(task);
+      expect(result.status).toBe("completed");
+      expect(result.content).toContain("Page CRO Audit");
+    });
+
+    it("throws ExecutionError on failure", async () => {
+      const client: ClaudeClient = {
+        createMessage: async () => {
+          throw new ExecutionError("API error", "API_ERROR", "", false);
+        },
+      };
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      await expect(executor.executeOrThrow(task)).rejects.toThrow(ExecutionError);
+    });
+  });
+
+  describe("never-throws contract", () => {
+    it("returns failed result when client throws non-ExecutionError", async () => {
+      const client: ClaudeClient = {
+        createMessage: async () => {
+          throw new TypeError("unexpected runtime error");
+        },
+      };
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      // execute() should NEVER throw, even for unexpected errors
+      const result = await executor.execute(task);
+      expect(result.status).toBe("failed");
+      expect(result.error?.code).toBe("API_ERROR");
+      expect(result.error?.taskId).toBe(task.id);
+    });
+  });
+
+  describe("empty response validation", () => {
+    it("returns RESPONSE_EMPTY for empty content", async () => {
+      const client = createMockClient({ content: "" });
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task);
+      expect(result.status).toBe("failed");
+      expect(result.error?.code).toBe("RESPONSE_EMPTY");
+    });
+
+    it("returns RESPONSE_EMPTY for whitespace-only content", async () => {
+      const client = createMockClient({ content: "   \n\t  " });
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task);
+      expect(result.status).toBe("failed");
+      expect(result.error?.code).toBe("RESPONSE_EMPTY");
+    });
+  });
+
+  describe("truncation warnings", () => {
+    it("includes warning when both calls are truncated", async () => {
+      const client = createMockClient((_params, callIndex) => {
+        return { stopReason: "max_tokens", content: `Truncated ${callIndex}` };
+      });
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task);
+      expect(result.truncated).toBe(true);
+      expect(result.warnings).toContain(
+        "Response truncated (max_tokens reached) — retry also truncated",
+      );
+      // Should use retry content (more concise), not original
+      expect(result.content).toBe("Truncated 1");
+    });
+  });
+
+  describe("budget priority gating", () => {
+    it("rejects task when priority not in allowedPriorities", async () => {
+      const client = createMockClient();
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask({ priority: "P3" });
+      await tw.workspace.writeTask(task);
+
+      const budget: BudgetState = {
+        totalBudget: 1000,
+        spent: 800,
+        percentUsed: 80,
+        level: "critical",
+        allowedPriorities: ["P0"],
+        modelOverride: "haiku",
+      };
+
+      const result = await executor.execute(task, { budgetState: budget });
+      expect(result.status).toBe("failed");
+      expect(result.error?.code).toBe("BUDGET_EXHAUSTED");
+      expect(result.error?.message).toContain("P3");
+      expect(client.calls.length).toBe(0); // Should not have called the client
+    });
+  });
+
+  describe("API error taskId propagation", () => {
+    it("sets correct taskId on API errors from client", async () => {
+      const client: ClaudeClient = {
+        createMessage: async () => {
+          // Client throws with empty taskId (as AnthropicClaudeClient does)
+          throw new ExecutionError("Rate limited", "RATE_LIMITED", "", false);
+        },
+      };
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task);
+      expect(result.status).toBe("failed");
+      expect(result.error?.taskId).toBe(task.id);
+      expect(result.error?.code).toBe("RATE_LIMITED");
     });
   });
 });

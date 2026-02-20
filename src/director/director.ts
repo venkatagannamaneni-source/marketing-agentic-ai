@@ -50,6 +50,7 @@ export class MarketingDirector {
   private readonly escalationEngine: EscalationEngine;
   private readonly client?: ClaudeClient;
   private readonly executorConfig?: ExecutorConfig;
+  private readonly executor?: AgentExecutor;
   private readonly humanReviewManager?: HumanReviewManager;
 
   constructor(
@@ -62,6 +63,9 @@ export class MarketingDirector {
     this.config = { ...DEFAULT_DIRECTOR_CONFIG, ...config };
     this.client = client;
     this.executorConfig = executorConfig;
+    if (client && executorConfig) {
+      this.executor = new AgentExecutor(client, workspace, executorConfig);
+    }
     this.humanReviewManager = humanReviewManager;
     this.goalDecomposer = new GoalDecomposer(PIPELINE_TEMPLATES);
     this.pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES);
@@ -239,11 +243,8 @@ export class MarketingDirector {
     decision: DirectorDecision;
     totalCost: number;
   }> {
-    if (!this.client) {
-      throw new Error("ClaudeClient required for executeAndReviewTask");
-    }
-    if (!this.executorConfig) {
-      throw new Error("ExecutorConfig required for executeAndReviewTask");
+    if (!this.executor) {
+      throw new Error("ClaudeClient and ExecutorConfig required for executeAndReviewTask");
     }
 
     const task = await this.workspace.readTask(taskId);
@@ -255,13 +256,8 @@ export class MarketingDirector {
       );
     }
 
-    // Execute
-    const executor = new AgentExecutor(
-      this.client,
-      this.workspace,
-      this.executorConfig,
-    );
-    const execution = await executor.executeOrThrow(task, { budgetState });
+    // Execute (reuses cached executor instance)
+    const execution = await this.executor.executeOrThrow(task, { budgetState });
 
     // Semantic review
     const existingReviews = await this.workspace.listReviews(taskId);

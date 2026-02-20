@@ -180,18 +180,32 @@ export class AgentExecutor {
       );
     }
 
-    // 2. Budget gate
-    if (budgetState?.level === "exhausted") {
-      return this.failedResult(
-        task,
-        startTime,
-        new ExecutionError(
-          `Budget exhausted — cannot execute task ${task.id}`,
-          "BUDGET_EXHAUSTED",
-          task.id,
-          false,
-        ),
-      );
+    // 2. Budget gate — reject if exhausted or if task priority is not allowed
+    if (budgetState) {
+      if (budgetState.level === "exhausted") {
+        return this.failedResult(
+          task,
+          startTime,
+          new ExecutionError(
+            `Budget exhausted — cannot execute task ${task.id}`,
+            "BUDGET_EXHAUSTED",
+            task.id,
+            false,
+          ),
+        );
+      }
+      if (!budgetState.allowedPriorities.includes(task.priority)) {
+        return this.failedResult(
+          task,
+          startTime,
+          new ExecutionError(
+            `Task ${task.id} priority ${task.priority} not allowed at budget level ${budgetState.level}`,
+            "BUDGET_EXHAUSTED",
+            task.id,
+            false,
+          ),
+        );
+      }
     }
 
     // 3. Load skill metadata
@@ -287,9 +301,10 @@ export class AgentExecutor {
         });
 
         retryCount = 1;
-        // Use the retry result if it completed
+        // Use the retry result: if it completed, mark as not truncated;
+        // if also truncated, still prefer the retry (asked for concise output)
+        content = retryResult.content;
         if (retryResult.stopReason === "end_turn") {
-          content = retryResult.content;
           truncated = false;
         }
         // Accumulate tokens from both calls
@@ -299,16 +314,21 @@ export class AgentExecutor {
       }
     } catch (err: unknown) {
       await this.safeUpdateStatus(task.id, "failed");
-      const execErr =
-        err instanceof ExecutionError
+      let execErr: ExecutionError;
+      if (err instanceof ExecutionError) {
+        // Re-wrap with correct taskId if the client left it empty
+        execErr = err.taskId
           ? err
-          : new ExecutionError(
-              `API call failed: ${errorMessage(err)}`,
-              "API_ERROR",
-              task.id,
-              false,
-              toError(err),
-            );
+          : new ExecutionError(err.message, err.code, task.id, err.retryable, err.cause as Error | undefined);
+      } else {
+        execErr = new ExecutionError(
+          `API call failed: ${errorMessage(err)}`,
+          "API_ERROR",
+          task.id,
+          false,
+          toError(err),
+        );
+      }
       return this.failedResult(task, startTime, execErr);
     }
 
@@ -460,8 +480,11 @@ export class AgentExecutor {
       await stat(skillsDir);
       this._validated = true;
     } catch {
-      throw new Error(
+      throw new ExecutionError(
         `Skills directory not found at ${skillsDir}. Check ExecutorConfig.projectRoot.`,
+        "SKILL_NOT_FOUND",
+        "",
+        false,
       );
     }
   }

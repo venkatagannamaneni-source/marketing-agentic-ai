@@ -47,7 +47,7 @@ describe("MarketingDirector — executeAndReviewTask", () => {
       await director.executeAndReviewTask(task.id);
       expect(true).toBe(false);
     } catch (err) {
-      expect((err as Error).message).toContain("ClaudeClient required");
+      expect((err as Error).message).toContain("required for executeAndReviewTask");
     }
   });
 
