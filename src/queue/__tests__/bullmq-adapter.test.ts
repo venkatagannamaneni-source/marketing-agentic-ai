@@ -167,6 +167,7 @@ describe("BullMQ adapter interface compliance", () => {
               data: sampleJobData,
               failedReason: "API timeout",
               attemptsMade: 3,
+              finishedOn: 1706745600000,
               retry: async () => {
                 retried = true;
               },
@@ -183,9 +184,43 @@ describe("BullMQ adapter interface compliance", () => {
       expect(failed).toHaveLength(1);
       expect(failed[0]!.failedReason).toBe("API timeout");
       expect(failed[0]!.attemptsMade).toBe(3);
+      expect(failed[0]!.finishedOn).toBe(1706745600000);
 
       await failed[0]!.retry();
       expect(retried).toBe(true);
+    });
+
+    it("FailedJob finishedOn is optional", async () => {
+      const adapter: QueueAdapter = {
+        async add(_name, _data, opts) {
+          return { id: opts.jobId };
+        },
+        async getJobCounts() {
+          return {};
+        },
+        async getJob() {
+          return null;
+        },
+        async getFailed() {
+          return [
+            {
+              id: "task-002",
+              data: sampleJobData,
+              failedReason: "Unknown error",
+              attemptsMade: 1,
+              // finishedOn intentionally omitted
+              retry: async () => {},
+            },
+          ];
+        },
+        async obliterate() {},
+        async close() {},
+        async pause() {},
+        async resume() {},
+      };
+
+      const failed = await adapter.getFailed();
+      expect(failed[0]!.finishedOn).toBeUndefined();
     });
   });
 

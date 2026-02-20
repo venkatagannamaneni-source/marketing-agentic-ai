@@ -64,7 +64,7 @@ export function loadConfig(
   }
 
   // ── Redis ──────────────────────────────────────────────────────────────
-  const redisHost = env("REDIS_HOST") || "localhost";
+  const redisHost = env("REDIS_HOST")?.trim() || "localhost";
 
   const redisPortRaw = env("REDIS_PORT");
   let redisPort = 6379;
@@ -85,11 +85,11 @@ export function loadConfig(
       : undefined;
 
   // ── Workspace ──────────────────────────────────────────────────────────
-  const workspaceDir = env("WORKSPACE_DIR") || "./workspace";
+  const workspaceDir = env("WORKSPACE_DIR")?.trim() || "./workspace";
   const rootDir = resolve(process.cwd(), workspaceDir);
 
   // ── Project Root ───────────────────────────────────────────────────────
-  const projectRootRaw = env("PROJECT_ROOT");
+  const projectRootRaw = env("PROJECT_ROOT")?.trim();
   const projectRoot = projectRootRaw
     ? resolve(process.cwd(), projectRootRaw)
     : resolve(import.meta.dir, "..");
@@ -108,7 +108,7 @@ export function loadConfig(
   }
 
   // ── Logging ────────────────────────────────────────────────────────────
-  const logLevelRaw = env("LOG_LEVEL") || "info";
+  const logLevelRaw = (env("LOG_LEVEL") || "info").trim();
   if (!LOG_LEVELS.includes(logLevelRaw as LogLevel)) {
     throw new ConfigError(
       `LOG_LEVEL must be one of: ${LOG_LEVELS.join(", ")}. Got "${logLevelRaw}".`,
@@ -117,7 +117,7 @@ export function loadConfig(
   }
   const logLevel = logLevelRaw as LogLevel;
 
-  const logFormatRaw = env("LOG_FORMAT") || "pretty";
+  const logFormatRaw = (env("LOG_FORMAT") || "pretty").trim();
   if (!LOG_FORMATS.includes(logFormatRaw as LogFormat)) {
     throw new ConfigError(
       `LOG_FORMAT must be one of: ${LOG_FORMATS.join(", ")}. Got "${logFormatRaw}".`,
@@ -161,5 +161,11 @@ export function loadConfig(
     maxParallelAgents,
   };
 
-  return Object.freeze(config);
+  return Object.freeze({
+    ...config,
+    redis: Object.freeze(config.redis),
+    workspace: Object.freeze(config.workspace),
+    budget: Object.freeze(config.budget),
+    logging: Object.freeze(config.logging),
+  });
 }

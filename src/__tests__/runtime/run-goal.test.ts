@@ -77,6 +77,11 @@ describe("inferCategory", () => {
     expect(inferCategory("Review competitive positioning")).toBe("competitive");
   });
 
+  it('maps "Create alternative page for Hubspot" to competitive', () => {
+    // "alternative" should match competitive before "page" matches optimization
+    expect(inferCategory("Create alternative page for Hubspot")).toBe("competitive");
+  });
+
   // ── Measurement ───────────────────────────────────────────────────────────
   it('maps "Set up analytics" to measurement', () => {
     expect(inferCategory("Set up analytics tracking")).toBe("measurement");
@@ -87,8 +92,12 @@ describe("inferCategory", () => {
   });
 
   it('maps "A/B test" to measurement', () => {
-    // Avoid "page" which triggers optimization first
     expect(inferCategory("Set up A/B test on pricing")).toBe("measurement");
+  });
+
+  it('maps "A/B test on pricing page" to measurement', () => {
+    // "A/B test" should match measurement before "page" matches optimization
+    expect(inferCategory("Set up A/B test on pricing page")).toBe("measurement");
   });
 
   it('maps "Track conversions" to measurement', () => {

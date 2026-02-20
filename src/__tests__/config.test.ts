@@ -206,6 +206,42 @@ describe("loadConfig", () => {
     expect(Object.isFrozen(config)).toBe(true);
   });
 
+  it("deeply freezes nested config objects", () => {
+    const config = loadConfig(validEnv());
+    expect(Object.isFrozen(config.redis)).toBe(true);
+    expect(Object.isFrozen(config.workspace)).toBe(true);
+    expect(Object.isFrozen(config.budget)).toBe(true);
+    expect(Object.isFrozen(config.logging)).toBe(true);
+  });
+
+  // ── Whitespace Trimming ──────────────────────────────────────────────────
+
+  it("trims whitespace from REDIS_HOST", () => {
+    const config = loadConfig(validEnv({ REDIS_HOST: "  myhost  " }));
+    expect(config.redis.host).toBe("myhost");
+  });
+
+  it("falls back to default for whitespace-only REDIS_HOST", () => {
+    const config = loadConfig(validEnv({ REDIS_HOST: "   " }));
+    expect(config.redis.host).toBe("localhost");
+  });
+
+  it("trims whitespace from WORKSPACE_DIR", () => {
+    const config = loadConfig(validEnv({ WORKSPACE_DIR: "  ./my-ws  " }));
+    expect(config.workspace.rootDir).toContain("my-ws");
+    expect(config.workspace.rootDir).not.toContain("  ");
+  });
+
+  it("trims whitespace from LOG_LEVEL", () => {
+    const config = loadConfig(validEnv({ LOG_LEVEL: "  debug  " }));
+    expect(config.logging.level).toBe("debug");
+  });
+
+  it("trims whitespace from LOG_FORMAT", () => {
+    const config = loadConfig(validEnv({ LOG_FORMAT: "  json  " }));
+    expect(config.logging.format).toBe("json");
+  });
+
   // ── ConfigError ────────────────────────────────────────────────────────
 
   it("ConfigError has correct name and field properties", () => {

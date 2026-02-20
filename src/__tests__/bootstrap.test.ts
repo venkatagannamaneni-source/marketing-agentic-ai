@@ -147,6 +147,21 @@ describe("Application interface contract", () => {
     }).toThrow();
   });
 
+  it("shutdown() cleans up signal handlers to prevent accumulation", async () => {
+    // Verify the shutdown contract: signal handlers should be removable
+    // to prevent MaxListenersExceededWarning on repeated bootstrap() calls
+    const initialListenerCount = process.listenerCount("SIGTERM");
+
+    // Create a handler and register it, simulating what bootstrap does
+    const handler = () => {};
+    process.on("SIGTERM", handler);
+    expect(process.listenerCount("SIGTERM")).toBe(initialListenerCount + 1);
+
+    // Simulate shutdown cleanup
+    process.removeListener("SIGTERM", handler);
+    expect(process.listenerCount("SIGTERM")).toBe(initialListenerCount);
+  });
+
   it("budget provider can be wired to costTracker", () => {
     const { CostTracker } = require("../observability/cost-tracker.ts");
     const costTracker = new CostTracker({

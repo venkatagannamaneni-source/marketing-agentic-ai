@@ -1,6 +1,6 @@
 import type { Application } from "../bootstrap.ts";
 import type { GoalCategory } from "../types/goal.ts";
-import type { Priority } from "../types/task.ts";
+import type { Priority, TaskStatus } from "../types/task.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,25 +31,27 @@ export interface GoalResult {
 
 const MAX_ITERATIONS = 50;
 const POLL_INTERVAL_MS = 2_000;
+const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set(["approved", "failed", "cancelled"]);
 
 // ── Category Inference ───────────────────────────────────────────────────────
 
 export function inferCategory(description: string): GoalCategory {
   const lower = description.toLowerCase();
 
-  if (/\b(content|blog|article|copy|write)\b/.test(lower)) return "content";
-  if (/\b(conver[ts]?|signup|cro|optimiz|landing|page)\b/.test(lower))
-    return "optimization";
+  // Order: specific categories first, generic ("page") last to avoid shadowing
+  if (/\b(competitor|alternative|vs\b|competitive)\b/.test(lower))
+    return "competitive";
+  if (/\b(analytics|track|measur|seo.?audit|a\/?b.?test)\b/.test(lower))
+    return "measurement";
   if (
     /\b(churn|retain|onboard|activation|email.?sequence|referral)\b/.test(
       lower,
     )
   )
     return "retention";
-  if (/\b(competitor|alternative|vs\b|competitive)/.test(lower))
-    return "competitive";
-  if (/\b(analytics|track|measur|seo.?audit|a\/?b.?test)\b/.test(lower))
-    return "measurement";
+  if (/\b(content|blog|article|copy|write)\b/.test(lower)) return "content";
+  if (/\b(conver[ts]?|signup|cro|optimiz|landing|page)\b/.test(lower))
+    return "optimization";
 
   return "strategic";
 }
@@ -191,18 +193,12 @@ export async function runGoal(
     const allTasks = await app.workspace.listTasks();
     const goalTasks = allTasks.filter((t) => t.goalId === goal.id);
 
-    // Count by status category
-    const completed = goalTasks.filter(
-      (t) => t.status === "approved" || t.status === "completed",
-    );
+    // Count by status category.
+    // Only "approved" is truly done — "completed" awaits review and is still in-flight.
+    // Active = everything that isn't terminal (approved/failed/cancelled).
+    const completed = goalTasks.filter((t) => t.status === "approved");
     const failed = goalTasks.filter((t) => t.status === "failed");
-    const active = goalTasks.filter(
-      (t) =>
-        t.status === "pending" ||
-        t.status === "assigned" ||
-        t.status === "in_progress" ||
-        t.status === "revision",
-    );
+    const active = goalTasks.filter((t) => !TERMINAL_STATUSES.has(t.status));
 
     tasksCompleted = completed.length;
     tasksFailed = failed.length;
@@ -230,14 +226,20 @@ export async function runGoal(
       break;
     }
 
-    // advanceResult is a Task[] for the next phase
-    phasesCompleted++;
-    await app.queueManager.enqueueBatch(advanceResult);
-    app.logger.info("Advanced to next phase", {
-      goalId: goal.id,
-      phase: phasesCompleted + 1,
-      newTasks: advanceResult.length,
-    });
+    // advanceGoal returns existing tasks when they're still processing,
+    // or new tasks when advancing to next phase. Only enqueue new ones.
+    const existingIds = new Set(goalTasks.map((t) => t.id));
+    const newTasks = advanceResult.filter((t) => !existingIds.has(t.id));
+
+    if (newTasks.length > 0) {
+      phasesCompleted++;
+      await app.queueManager.enqueueBatch(newTasks);
+      app.logger.info("Advanced to next phase", {
+        goalId: goal.id,
+        phase: phasesCompleted + 1,
+        newTasks: newTasks.length,
+      });
+    }
   }
 
   // 8. Determine final status

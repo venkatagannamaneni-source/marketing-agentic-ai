@@ -184,7 +184,7 @@ async function main(): Promise<void> {
       try {
         const result = await app.director.startPipeline(
           args.pipeline,
-          args.pipeline,
+          `Run pipeline: ${args.pipeline}`,
           args.priority,
         );
 

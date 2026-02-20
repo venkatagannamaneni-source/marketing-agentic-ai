@@ -293,7 +293,9 @@ export class TaskQueueManager {
     return failedJobs.map((job) => ({
       taskId: job.data.taskId,
       skill: job.data.skill,
-      failedAt: new Date().toISOString(),
+      failedAt: job.finishedOn
+        ? new Date(job.finishedOn).toISOString()
+        : new Date().toISOString(),
       attempts: job.attemptsMade,
       lastError: job.failedReason,
       originalPriority: job.data.priority,
@@ -427,6 +429,15 @@ export class TaskQueueManager {
     // Check if Redis is back and drain fallback queue
     if (this.redis.isConnected()) {
       await this.drainFallbackQueue();
+    }
+
+    // Clean stale enqueue timestamps (jobs that never became active)
+    const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+    const now = Date.now();
+    for (const [taskId, timestamp] of this.enqueueTimestamps) {
+      if (now - timestamp > STALE_THRESHOLD_MS) {
+        this.enqueueTimestamps.delete(taskId);
+      }
     }
   }
 

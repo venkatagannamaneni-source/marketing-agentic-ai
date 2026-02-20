@@ -16,6 +16,9 @@ export interface BullMQConnectionOptions {
   readonly host: string;
   readonly port: number;
   readonly password?: string;
+  readonly db?: number;
+  readonly maxRetriesPerRequest?: number | null;
+  readonly enableReadyCheck?: boolean;
 }
 
 // ── BullMQ Queue Adapter ───────────────────────────────────────────────────
@@ -95,6 +98,7 @@ export class BullMQQueueAdapter implements QueueAdapter {
       data: job.data,
       failedReason: job.failedReason ?? "Unknown",
       attemptsMade: job.attemptsMade,
+      finishedOn: job.finishedOn,
       retry: async () => {
         await job.retry();
       },

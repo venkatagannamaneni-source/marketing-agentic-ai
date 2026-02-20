@@ -1,3 +1,4 @@
+import { mkdir, writeFile } from "node:fs/promises";
 import type { RuntimeConfig } from "./config.ts";
 import { createLogger } from "./observability/logger.ts";
 import type { Logger } from "./observability/logger.ts";
@@ -148,6 +149,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     host: config.redis.host,
     port: config.redis.port,
     password: config.redis.password,
+    maxRetriesPerRequest: 3,
   };
   const queueName = "marketing-tasks";
 
@@ -210,7 +212,25 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
         });
       }
 
-      // 2. Close Redis connection
+      // 2. Flush cost data to workspace
+      try {
+        const metricsDir = `${config.workspace.rootDir}/metrics`;
+        await costTracker.flush(metricsDir, {
+          mkdir: async (dir: string) => {
+            await mkdir(dir, { recursive: true });
+          },
+          writeFile: async (path: string, content: string) => {
+            await writeFile(path, content, "utf-8");
+          },
+        });
+        logger.info("Cost data flushed");
+      } catch (err: unknown) {
+        logger.error("Error flushing cost data", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      // 3. Close Redis connection
       try {
         await redis.close();
         logger.info("Redis connection closed");
@@ -220,23 +240,32 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
         });
       }
 
+      // 4. Remove signal handlers to prevent accumulation
+      process.removeListener("SIGTERM", sigtermHandler);
+      process.removeListener("SIGINT", sigintHandler);
+
       logger.info("Shutdown complete");
     },
   };
 
-  // 15. Signal handlers for graceful shutdown
+  // 15. Signal handlers for graceful shutdown (with dedup guard)
+  let signalHandled = false;
   const onSignal = async (signal: string) => {
+    if (signalHandled) return;
+    signalHandled = true;
     logger.info(`Received ${signal}, initiating graceful shutdown`);
     await app.shutdown();
     process.exit(0);
   };
 
-  process.on("SIGTERM", () => {
+  const sigtermHandler = () => {
     onSignal("SIGTERM");
-  });
-  process.on("SIGINT", () => {
+  };
+  const sigintHandler = () => {
     onSignal("SIGINT");
-  });
+  };
+  process.on("SIGTERM", sigtermHandler);
+  process.on("SIGINT", sigintHandler);
 
   return app;
 }
