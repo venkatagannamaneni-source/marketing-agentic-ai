@@ -283,34 +283,37 @@ export class AgentExecutor {
       if (result.stopReason !== "end_turn") {
         truncated = true;
 
-        const retryResult = await this.client.createMessage({
-          model,
-          system: prompt.systemPrompt,
-          messages: [
-            { role: "user", content: prompt.userMessage },
-            { role: "assistant", content: result.content },
-            {
-              role: "user",
-              content:
-                "\n\nIMPORTANT: Your previous response was truncated. Please provide a complete but more concise response.",
-            },
-          ],
-          maxTokens: this.config.defaultMaxTokens,
-          timeoutMs: this.config.defaultTimeoutMs,
-          signal,
-        });
+        // Skip retry if already aborted — keep partial content
+        if (!signal?.aborted) {
+          const retryResult = await this.client.createMessage({
+            model,
+            system: prompt.systemPrompt,
+            messages: [
+              { role: "user", content: prompt.userMessage },
+              { role: "assistant", content: result.content },
+              {
+                role: "user",
+                content:
+                  "\n\nIMPORTANT: Your previous response was truncated. Please provide a complete but more concise response.",
+              },
+            ],
+            maxTokens: this.config.defaultMaxTokens,
+            timeoutMs: this.config.defaultTimeoutMs,
+            signal,
+          });
 
-        retryCount = 1;
-        // Use the retry result: if it completed, mark as not truncated;
-        // if also truncated, still prefer the retry (asked for concise output)
-        content = retryResult.content;
-        if (retryResult.stopReason === "end_turn") {
-          truncated = false;
+          retryCount = 1;
+          // Use the retry result: if it completed, mark as not truncated;
+          // if also truncated, still prefer the retry (asked for concise output)
+          content = retryResult.content;
+          if (retryResult.stopReason === "end_turn") {
+            truncated = false;
+          }
+          // Accumulate tokens from both calls
+          inputTokens += retryResult.inputTokens;
+          outputTokens += retryResult.outputTokens;
+          durationMs += retryResult.durationMs;
         }
-        // Accumulate tokens from both calls
-        inputTokens += retryResult.inputTokens;
-        outputTokens += retryResult.outputTokens;
-        durationMs += retryResult.durationMs;
       }
     } catch (err: unknown) {
       await this.safeUpdateStatus(task.id, "failed");

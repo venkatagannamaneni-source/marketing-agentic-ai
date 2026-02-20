@@ -672,6 +672,36 @@ describe("AgentExecutor", () => {
     });
   });
 
+  describe("abort skips truncation retry", () => {
+    it("returns truncated result without retrying when aborted between calls", async () => {
+      const controller = new AbortController();
+      const client = createMockClient((_params, callIndex) => {
+        if (callIndex === 0) {
+          // First call returns truncated — then we abort before retry
+          controller.abort();
+          return { stopReason: "max_tokens", content: "Partial content" };
+        }
+        // Should never reach here
+        return { content: "Retry content" };
+      });
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task, { signal: controller.signal });
+
+      // Should be completed with truncated content (no retry attempted)
+      expect(result.status).toBe("completed");
+      expect(result.truncated).toBe(true);
+      expect(result.content).toBe("Partial content");
+      expect(client.calls.length).toBe(1); // Only one call, retry was skipped
+    });
+  });
+
   describe("API error taskId propagation", () => {
     it("sets correct taskId on API errors from client", async () => {
       const client: ClaudeClient = {

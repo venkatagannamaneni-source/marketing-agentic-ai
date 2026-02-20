@@ -149,6 +149,11 @@ export class AnthropicClaudeClient implements ClaudeClient {
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
+      // Check abort before each attempt (catches abort during backoff sleep)
+      if (params.signal?.aborted) {
+        throw new ExecutionError("Request aborted", "ABORTED", "", false);
+      }
+
       try {
         return await this.anthropic.messages.create(
           {

@@ -112,14 +112,20 @@ describe("ExecutionError", () => {
 
   it("has all valid error codes", () => {
     const codes: Array<ExecutionError["code"]> = [
-      "RATE_LIMITED",
+      "SKILL_NOT_FOUND",
+      "INPUT_NOT_FOUND",
       "API_ERROR",
+      "RATE_LIMITED",
       "TIMEOUT",
+      "API_OVERLOADED",
+      "RESPONSE_EMPTY",
       "TRUNCATED",
       "MALFORMED_OUTPUT",
       "BUDGET_EXHAUSTED",
-      "INPUT_NOT_FOUND",
-      "API_OVERLOADED",
+      "TASK_NOT_EXECUTABLE",
+      "WORKSPACE_WRITE_FAILED",
+      "ABORTED",
+      "UNKNOWN",
     ];
     for (const code of codes) {
       const err = new ExecutionError("test", code, "", false);
