@@ -256,6 +256,7 @@ export type {
   EventBusLogger,
   EmitResult,
   EventEmitter,
+  WebhookEventBus,
   WebhookServerConfig,
   WebhookServer,
   WebhookStats,

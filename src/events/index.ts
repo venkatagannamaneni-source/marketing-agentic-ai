@@ -16,6 +16,7 @@ export { DEFAULT_EVENT_MAPPINGS } from "./default-mappings.ts";
 // ── Webhook Server ──────────────────────────────────────────────────────────
 export { createWebhookServer } from "./webhook-server.ts";
 export type {
+  WebhookEventBus,
   WebhookServerConfig,
   WebhookServer,
   WebhookStats,

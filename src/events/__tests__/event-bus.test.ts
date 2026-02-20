@@ -476,6 +476,41 @@ describe("EventBus", () => {
       expect(queueManager.enqueuedBatches).toHaveLength(0);
     });
 
+    it("triggers all sibling mappings for same event type with cooldown in one emit", async () => {
+      const mappings: EventMapping[] = [
+        {
+          eventType: "traffic_drop",
+          pipelineTemplate: "SEO Cycle",
+          priority: "P1",
+          cooldownMs: 60_000,
+        },
+        {
+          eventType: "traffic_drop",
+          pipelineTemplate: "Content Production",
+          priority: "P2",
+          cooldownMs: 60_000,
+        },
+      ];
+      const bus = new EventBus(mappings, { director, queueManager });
+
+      const event = createTestEvent({ type: "traffic_drop" });
+      const result = await bus.emit(event);
+
+      // Both mappings should trigger in a single emit call
+      expect(result.pipelinesTriggered).toBe(2);
+      expect(result.pipelineIds).toHaveLength(2);
+      expect(director.calls).toHaveLength(2);
+      expect(director.calls[0]!.template).toBe("SEO Cycle");
+      expect(director.calls[1]!.template).toBe("Content Production");
+
+      // Second emit should be blocked by cooldown (both mappings)
+      const event2 = createTestEvent({ type: "traffic_drop" });
+      const result2 = await bus.emit(event2);
+      expect(result2.pipelinesTriggered).toBe(0);
+      expect(result2.skippedReasons).toHaveLength(1);
+      expect(result2.skippedReasons[0]).toContain("Cooldown active");
+    });
+
     it("cooldown is per event type, not per event ID", async () => {
       const mappings: EventMapping[] = [
         {

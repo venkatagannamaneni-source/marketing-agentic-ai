@@ -191,5 +191,19 @@ describe("BudgetGate", () => {
       expect(event.data.spent).toBe(1000);
       expect(event.data.totalBudget).toBe(1000);
     });
+
+    it("produces unique event IDs across multiple calls in the same tick", () => {
+      const events: SystemEvent[] = [];
+      const gateWithEvents = new BudgetGate((e) => events.push(e));
+      const budget = createTestBudgetState("exhausted");
+
+      gateWithEvents.check(createTestTask({ priority: "P0" }), budget);
+      gateWithEvents.check(createTestTask({ priority: "P0" }), budget);
+      gateWithEvents.check(createTestTask({ priority: "P0" }), budget);
+
+      expect(events).toHaveLength(3);
+      const ids = new Set(events.map((e) => e.id));
+      expect(ids.size).toBe(3);
+    });
   });
 });

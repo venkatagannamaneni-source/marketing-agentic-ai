@@ -247,5 +247,18 @@ describe("FailureTracker", () => {
       expect(blocked).toHaveLength(1);
       expect(blocked[0]!.data.pipelineId).toBeNull();
     });
+
+    it("produces unique event IDs across multiple calls in the same tick", () => {
+      const events: SystemEvent[] = [];
+      const trackerWithEvents = new FailureTracker(5, (e) => events.push(e));
+
+      trackerWithEvents.recordFailure("t1", "pipe-a");
+      trackerWithEvents.recordFailure("t2", "pipe-a");
+      trackerWithEvents.recordFailure("t3", "pipe-a");
+
+      expect(events).toHaveLength(3);
+      const ids = new Set(events.map((e) => e.id));
+      expect(ids.size).toBe(3);
+    });
   });
 });

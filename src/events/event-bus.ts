@@ -122,18 +122,30 @@ export class EventBus {
       };
     }
 
-    for (const mapping of matchingMappings) {
-      // Check cooldown
-      if (mapping.cooldownMs !== undefined) {
-        const lastEmit = this.cooldownTimestamps.get(event.type);
-        if (lastEmit !== undefined && Date.now() - lastEmit < mapping.cooldownMs) {
-          const reason = `Cooldown active for ${event.type} (${mapping.cooldownMs}ms)`;
-          this.logger.info(reason, { eventType: event.type });
-          skippedReasons.push(reason);
-          continue;
-        }
-      }
+    // Check cooldown for this event type ONCE before processing mappings.
+    // Cooldown is per event type — use the minimum cooldownMs among matching mappings.
+    const cooldownMs = matchingMappings.reduce((min: number | undefined, m) => {
+      if (m.cooldownMs === undefined) return min;
+      return min === undefined ? m.cooldownMs : Math.min(min, m.cooldownMs);
+    }, undefined);
 
+    if (cooldownMs !== undefined) {
+      const lastEmit = this.cooldownTimestamps.get(event.type);
+      if (lastEmit !== undefined && Date.now() - lastEmit < cooldownMs) {
+        const reason = `Cooldown active for ${event.type} (${cooldownMs}ms)`;
+        this.logger.info(reason, { eventType: event.type });
+        this.processedEventIds.set(event.id, Date.now());
+        return {
+          eventId: event.id,
+          eventType: event.type,
+          pipelinesTriggered: 0,
+          pipelineIds: [],
+          skippedReasons: [reason],
+        };
+      }
+    }
+
+    for (const mapping of matchingMappings) {
       // Evaluate condition
       if (mapping.condition) {
         try {
@@ -177,9 +189,6 @@ export class EventBus {
 
         pipelineIds.push(result.run.id);
 
-        // Update cooldown timestamp after successful trigger
-        this.cooldownTimestamps.set(event.type, Date.now());
-
         this.logger.info("Pipeline triggered", {
           eventType: event.type,
           pipelineTemplate: mapping.pipelineTemplate,
@@ -192,6 +201,11 @@ export class EventBus {
         this.logger.error(reason, { eventType: event.type, error: message });
         skippedReasons.push(reason);
       }
+    }
+
+    // Update cooldown timestamp after successful trigger(s)
+    if (pipelineIds.length > 0 && cooldownMs !== undefined) {
+      this.cooldownTimestamps.set(event.type, Date.now());
     }
 
     // Record this event ID as processed

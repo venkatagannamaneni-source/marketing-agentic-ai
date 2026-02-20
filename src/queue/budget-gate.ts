@@ -13,6 +13,8 @@ type OnEventCallback = (event: SystemEvent) => void;
 
 export type BudgetDecision = "allow" | "defer" | "block";
 
+let budgetEventSeq = 0;
+
 export class BudgetGate {
   private readonly onEvent?: OnEventCallback;
 
@@ -72,7 +74,7 @@ export class BudgetGate {
     budget: BudgetState,
   ): void {
     this.onEvent?.({
-      id: `budget-${type}-${Date.now()}`,
+      id: `budget-${type}-${Date.now()}-${++budgetEventSeq}`,
       type,
       timestamp: new Date().toISOString(),
       source: "budget-gate",

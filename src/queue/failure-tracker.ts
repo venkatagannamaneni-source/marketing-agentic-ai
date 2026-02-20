@@ -10,6 +10,7 @@ type OnEventCallback = (event: SystemEvent) => void;
 // When the threshold is reached, signals that the worker should pause.
 
 const GLOBAL_KEY = "__global__";
+let failureEventSeq = 0;
 
 export class FailureTracker {
   private readonly consecutiveFailures = new Map<string, number>();
@@ -34,7 +35,7 @@ export class FailureTracker {
 
     // Emit agent_failure event
     this.onEvent?.({
-      id: `agent-failure-${taskId}-${Date.now()}`,
+      id: `agent-failure-${taskId}-${Date.now()}-${++failureEventSeq}`,
       type: "agent_failure",
       timestamp: new Date().toISOString(),
       source: "failure-tracker",
@@ -44,7 +45,7 @@ export class FailureTracker {
     // Emit pipeline_blocked when cascade threshold is exactly reached
     if (newCount === this.cascadeThreshold) {
       this.onEvent?.({
-        id: `pipeline-blocked-${key}-${Date.now()}`,
+        id: `pipeline-blocked-${key}-${Date.now()}-${++failureEventSeq}`,
         type: "pipeline_blocked",
         timestamp: new Date().toISOString(),
         source: "failure-tracker",

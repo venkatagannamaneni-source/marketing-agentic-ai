@@ -68,7 +68,7 @@ describe("WebhookServer", () => {
     server = createWebhookServer({
       port: 0,
       bearerToken: TOKEN,
-      eventBus: bus as any,
+      eventBus: bus,
     });
     server.start();
     const baseUrl = `http://localhost:${server.port}`;
@@ -323,6 +323,26 @@ describe("WebhookServer", () => {
       });
 
       expect(response.status).toBe(400);
+    });
+
+    it("returns 500 when eventBus.emit throws", async () => {
+      const mockBus = createMockEventBus();
+      mockBus.shouldThrow = true;
+      const { baseUrl } = startServer(mockBus);
+      const event = createValidEvent();
+
+      const response = await fetch(`${baseUrl}/webhook`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TOKEN}`,
+        },
+        body: JSON.stringify(event),
+      });
+
+      expect(response.status).toBe(500);
+      const body = await parseJson(response);
+      expect(body.error).toBe("Internal Server Error");
     });
 
     it("rejects event with array data field", async () => {

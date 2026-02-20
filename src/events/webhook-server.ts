@@ -2,14 +2,21 @@
 type BunServer = ReturnType<typeof Bun.serve>;
 import type { SystemEvent, EventType } from "../types/events.ts";
 import { EVENT_TYPES } from "../types/events.ts";
-import type { EventBus, EventBusLogger } from "./event-bus.ts";
+import type { EmitResult, EventBusLogger } from "./event-bus.ts";
+
+// ── Webhook Event Bus Interface ──────────────────────────────────────────────
+// Minimal interface for DI — avoids coupling to the concrete EventBus class.
+
+export interface WebhookEventBus {
+  emit(event: SystemEvent): Promise<EmitResult>;
+}
 
 // ── Webhook Server Types ────────────────────────────────────────────────────
 
 export interface WebhookServerConfig {
   readonly port: number;
   readonly bearerToken: string;
-  readonly eventBus: EventBus;
+  readonly eventBus: WebhookEventBus;
   readonly logger?: EventBusLogger;
 }
 
@@ -181,7 +188,18 @@ export function createWebhookServer(config: WebhookServerConfig): WebhookServer 
       }
 
       // Emit event
-      const result = await config.eventBus.emit(validation.event);
+      let result: EmitResult;
+      try {
+        result = await config.eventBus.emit(validation.event);
+      } catch (emitErr: unknown) {
+        const message = emitErr instanceof Error ? emitErr.message : String(emitErr);
+        webhooksRejected++;
+        logger.error("EventBus emit failed", { error: message });
+        return jsonResponse(
+          { error: "Internal Server Error", message: "Failed to process event" },
+          500,
+        );
+      }
       webhooksAccepted++;
 
       logger.info("Webhook processed", {
