@@ -2,7 +2,8 @@
   "name": "marketing-agentic-ai",
   "module": "index.ts",
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "pino-pretty": "^11.0.0"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -14,6 +15,7 @@
     "@playwright/test": "1.56.1",
     "bullmq": "^5.69.3",
     "ioredis": "^5.9.3",
+    "pino": "^9.0.0",
     "playwright": "1.56.1"
   }
 }
