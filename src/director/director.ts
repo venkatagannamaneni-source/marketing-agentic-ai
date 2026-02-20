@@ -90,7 +90,7 @@ export class MarketingDirector {
         const allLearnings = parseLearnings(rawLearnings);
         const routing = this.routeGoal(category);
         const relevantSkills = new Set<string>(
-          routing.routes.flatMap(r => [...r.skills]),
+          routing.routes.flatMap(r => r.skills),
         );
         const relevant = allLearnings
           .filter(l => relevantSkills.has(l.agent) || l.agent === "director")
@@ -105,8 +105,8 @@ export class MarketingDirector {
           }));
         }
       }
-    } catch {
-      // Non-fatal — learnings are supplementary
+    } catch (_err: unknown) {
+      // Non-fatal — learnings are supplementary, goal creation proceeds without them
     }
 
     const goal: Goal = {

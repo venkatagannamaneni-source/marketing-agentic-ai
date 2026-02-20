@@ -310,6 +310,9 @@ export function serializeLearningEntry(entry: LearningEntry): string {
 export function parseLearnings(markdown: string): LearningEntry[] {
   if (!markdown.trim()) return [];
 
+  const validAgents: readonly string[] = [...SKILL_NAMES, "director"];
+  const validOutcomes: readonly string[] = ["success", "failure", "partial"];
+
   const entries: LearningEntry[] = [];
   const blocks = markdown.split(/(?=^### )/m);
 
@@ -318,15 +321,23 @@ export function parseLearnings(markdown: string): LearningEntry[] {
     if (!timestampMatch) continue;
 
     const timestamp = timestampMatch[1]!.trim();
-    const agent = extractLearningField(block, "Agent") as LearningEntry["agent"];
+    const agentStr = extractLearningField(block, "Agent");
+    if (!agentStr || !validAgents.includes(agentStr)) continue;
+    const agent = agentStr as LearningEntry["agent"];
+
     const goalId = extractLearningField(block, "Goal") || null;
-    const outcome = (extractLearningField(block, "Outcome") || "partial") as LearningEntry["outcome"];
+
+    const outcomeStr = extractLearningField(block, "Outcome") || "partial";
+    if (!validOutcomes.includes(outcomeStr)) continue;
+    const outcome = outcomeStr as LearningEntry["outcome"];
+
     const learning = extractLearningField(block, "Learning") || "";
     const actionTaken = extractLearningField(block, "Action") || "";
     const tagsStr = extractLearningField(block, "Tags");
     const tags = tagsStr ? tagsStr.split(",").map(t => t.trim()) : undefined;
     const confStr = extractLearningField(block, "Confidence");
-    const confidence = confStr ? parseFloat(confStr) : undefined;
+    const confNum = confStr ? parseFloat(confStr) : undefined;
+    const confidence = confNum !== undefined && !Number.isNaN(confNum) ? confNum : undefined;
 
     entries.push({ timestamp, agent, goalId, outcome, learning, actionTaken, tags, confidence });
   }

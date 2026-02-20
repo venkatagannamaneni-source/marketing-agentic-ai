@@ -819,4 +819,65 @@ describe("parseLearnings", () => {
     expect(parsed[0]!.tags).toEqual(["forms", "cro"]);
     expect(parsed[0]!.confidence).toBe(0.88);
   });
+
+  it("skips entries with invalid agent names", () => {
+    const md = `### 2026-02-19T12:00:00.000Z
+
+- **Agent:** invalid-agent-xyz
+- **Outcome:** success
+- **Learning:** Should be skipped
+- **Action:** Skipped
+
+### 2026-02-19T13:00:00.000Z
+
+- **Agent:** copywriting
+- **Outcome:** success
+- **Learning:** Valid entry
+- **Action:** Valid action
+`;
+
+    const entries = parseLearnings(md);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.agent).toBe("copywriting");
+  });
+
+  it("skips entries with invalid outcome values", () => {
+    const md = `### 2026-02-19T12:00:00.000Z
+
+- **Agent:** copywriting
+- **Outcome:** maybe-success
+- **Learning:** Should be skipped
+- **Action:** Skipped
+`;
+
+    const entries = parseLearnings(md);
+    expect(entries).toHaveLength(0);
+  });
+
+  it("treats non-numeric confidence as undefined", () => {
+    const md = `### 2026-02-19T12:00:00.000Z
+
+- **Agent:** copywriting
+- **Outcome:** success
+- **Learning:** Test
+- **Action:** Test
+- **Confidence:** very-high
+`;
+
+    const entries = parseLearnings(md);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.confidence).toBeUndefined();
+  });
+
+  it("handles entries with missing agent field", () => {
+    const md = `### 2026-02-19T12:00:00.000Z
+
+- **Outcome:** success
+- **Learning:** No agent
+- **Action:** Some action
+`;
+
+    const entries = parseLearnings(md);
+    expect(entries).toHaveLength(0);
+  });
 });

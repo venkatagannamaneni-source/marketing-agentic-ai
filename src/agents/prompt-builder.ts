@@ -79,17 +79,25 @@ export async function buildAgentPrompt(
         // Token budget: max 5% of context window for learnings
         const learningsBudget = Math.floor(maxContextTokens * 0.05);
         let learningsText = learningLines.join("\n");
-        while (estimateTokens("", learningsText) > learningsBudget && learningLines.length > 1) {
+        while (estimateTokens("", learningsText) > learningsBudget && learningLines.length > 0) {
           learningLines.pop();
           learningsText = learningLines.join("\n");
         }
 
-        learningsIncluded = learningLines.length;
-        parts.push(`<past-learnings>\n${learningsText}\n</past-learnings>`);
+        if (learningLines.length > 0) {
+          learningsIncluded = learningLines.length;
+          parts.push(`<past-learnings>\n${learningsText}\n</past-learnings>`);
+        }
       }
     }
-  } catch {
-    // Learnings are supplementary — don't fail the prompt build
+  } catch (err: unknown) {
+    // Learnings are supplementary — skip on expected errors, surface unexpected ones
+    if (err instanceof WorkspaceError) {
+      warnings.push(`Failed to load learnings: ${err.message}`);
+    } else if (err instanceof Error) {
+      warnings.push(`Failed to load learnings: ${err.message}`);
+    }
+    // Don't re-throw — learnings should never block prompt building
   }
 
   // 3. Task requirements

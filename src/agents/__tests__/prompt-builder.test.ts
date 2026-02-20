@@ -460,4 +460,31 @@ describe("buildAgentPrompt", () => {
 
     expect(prompt.learningsIncluded).toBeLessThanOrEqual(10);
   });
+
+  it("drops all learnings when token budget is extremely small", async () => {
+    await tw.workspace.appendLearning({
+      timestamp: "2026-02-19T10:00:00.000Z",
+      agent: "page-cro",
+      goalId: null,
+      outcome: "success",
+      learning: "A".repeat(500),
+      actionTaken: "B".repeat(500),
+    });
+
+    const meta = await loadSkillMeta("page-cro", PROJECT_ROOT);
+    const task = createPromptTestTask();
+
+    // With maxContextTokens=100, learnings budget = 5 tokens (~20 chars)
+    // The learning is ~1000 chars, so it should be dropped entirely
+    const prompt = await buildAgentPrompt(
+      task,
+      meta,
+      tw.workspace,
+      PROJECT_ROOT,
+      100,
+    );
+
+    expect(prompt.learningsIncluded).toBe(0);
+    expect(prompt.userMessage).not.toContain("<past-learnings>");
+  });
 });
