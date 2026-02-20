@@ -35,7 +35,7 @@ export type {
   PipelineRun,
 } from "./pipeline.ts";
 
-export type { EventType, SystemEvent, ScheduleEntry } from "./events.ts";
+export type { EventType, SystemEvent, ScheduleEntry, ScheduleState } from "./events.ts";
 
 export type {
   SystemState,

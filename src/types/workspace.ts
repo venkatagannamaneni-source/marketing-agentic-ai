@@ -10,6 +10,7 @@ export const WORKSPACE_DIRS = [
   "metrics",
   "memory",
   "goals",
+  "schedules",
 ] as const;
 
 export type WorkspaceDir = (typeof WORKSPACE_DIRS)[number];
@@ -40,6 +41,8 @@ export interface WorkspacePaths {
   readonly goals: string;
   goalFile(goalId: string): string;
   goalPlanFile(goalId: string): string;
+  readonly schedules: string;
+  scheduleStateFile(scheduleId: string): string;
 }
 
 // ── Learning Entry (for memory/learnings.md) ─────────────────────────────────
