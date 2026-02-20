@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import type { E2EContext } from "./helpers.ts";
 import { bootstrapE2E } from "./helpers.ts";
-import { ExecutionError } from "../../executor/types.ts";
+import { ExecutionError } from "../../agents/claude-client.ts";
 
 describe("E2E: Budget Gating", () => {
   let ctx: E2EContext;
@@ -129,13 +129,11 @@ describe("E2E: Failure Handling", () => {
             "Simulated API error",
             "API_ERROR",
             "test",
+            false,
           );
         }
         return {
           content: `# Output\n\n## Summary\n\nValid output for step ${callCount}.\nLine 2.\nLine 3.\n`,
-          inputTokens: 100,
-          outputTokens: 200,
-          stopReason: "end_turn",
         };
       },
     });

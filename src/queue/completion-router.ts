@@ -1,7 +1,7 @@
 import type { Task } from "../types/task.ts";
 import type { SkillName } from "../types/agent.ts";
 import { SKILL_SQUAD_MAP } from "../types/agent.ts";
-import type { ExecutionResult } from "../executor/types.ts";
+import type { ExecutionResult } from "../agents/executor.ts";
 import type { WorkspaceManager } from "../workspace/workspace-manager.ts";
 import type { MarketingDirector } from "../director/director.ts";
 import type { RoutingAction } from "./types.ts";

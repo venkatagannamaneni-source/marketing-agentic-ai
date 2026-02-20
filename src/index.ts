@@ -109,7 +109,7 @@ export {
   createWorkspacePaths,
 } from "./workspace/index.ts";
 
-// ── Agents (Task 7 — new modular agent system) ──────────────────────────────
+// ── Agents ───────────────────────────────────────────────────────────────────
 export {
   AGENT_DEPENDENCY_GRAPH,
   getUpstreamSkills,
@@ -118,13 +118,13 @@ export {
   PIPELINE_TEMPLATES,
   loadSkillMeta,
   loadAllSkills,
-  // Claude Client (new)
-  type ClaudeClient as AgentClaudeClient,
+  // Claude Client
+  type ClaudeClient,
   type ClaudeMessageParams,
   type ClaudeMessage,
   type ClaudeMessageResult,
-  type ExecutionErrorCode as AgentExecutionErrorCode,
-  ExecutionError as AgentExecutionError,
+  type ExecutionErrorCode,
+  ExecutionError,
   MODEL_MAP,
   COST_PER_MILLION_TOKENS,
   estimateCost,
@@ -134,40 +134,14 @@ export {
   // Prompt Builder
   type BuiltPrompt,
   buildAgentPrompt,
-  // Agent Executor (new)
-  type ExecutorConfig as AgentExecutorConfig,
-  type ExecutionResult as AgentExecutionResult,
-  type ExecutionMetadata,
-  AgentExecutor as ModularAgentExecutor,
-  DEFAULT_EXECUTOR_CONFIG,
-  // Client Adapters
-  ModernToLegacyClientAdapter,
-  LegacyToModernClientAdapter,
-} from "./agents/index.ts";
-
-// ── Executor (Tasks 1-6 — used by pipeline and queue) ──────────────────────
-export {
-  AgentExecutor,
-  AnthropicClaudeClient as LegacyAnthropicClaudeClient,
-  MockClaudeClient,
-  loadSkillContent,
-  buildPrompt,
-  cancellableSleep,
-  ExecutionError,
-  DEFAULT_MODEL_MAP,
-  createDefaultConfig,
-  type ClaudeClient,
-  type ClaudeClientConfig,
-  type ClaudeRequest,
-  type ClaudeResponse,
-  type ExecutionResult,
-  type ExecutionStatus,
+  // Agent Executor
   type ExecutorConfig,
-  type ExecutionErrorCode,
-  type SkillContent,
-  type BuildPromptParams,
-  type UpstreamOutput,
-} from "./executor/index.ts";
+  type ExecutionResult,
+  type ExecutionMetadata,
+  type ExecuteOptions,
+  AgentExecutor,
+  DEFAULT_EXECUTOR_CONFIG,
+} from "./agents/index.ts";
 
 // ── Director ─────────────────────────────────────────────────────────────────
 export type {

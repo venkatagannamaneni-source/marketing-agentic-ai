@@ -5,8 +5,11 @@ import type { PipelineDefinition, PipelineRun } from "../../types/pipeline.ts";
 import type { SkillName } from "../../types/agent.ts";
 import { FileSystemWorkspaceManager } from "../../workspace/workspace-manager.ts";
 import { generateRunId } from "../../workspace/id.ts";
-import type { ClaudeRequest, ClaudeResponse } from "../../executor/types.ts";
-import { cancellableSleep } from "../../executor/utils.ts";
+import type {
+  ClaudeClient,
+  ClaudeMessageParams,
+  ClaudeMessageResult,
+} from "../../agents/claude-client.ts";
 
 // ── Test Workspace ──────────────────────────────────────────────────────────
 
@@ -105,8 +108,8 @@ export interface ConcurrencyTracker {
  * Each call has an artificial delay so concurrent calls overlap,
  * enabling tests to verify concurrency limits.
  */
-export class ConcurrencyTrackingClaudeClient {
-  readonly calls: ClaudeRequest[] = [];
+export class ConcurrencyTrackingClaudeClient implements ClaudeClient {
+  readonly calls: ClaudeMessageParams[] = [];
   private concurrent = 0;
   private maxConcurrentSeen = 0;
   private readonly delayMs: number;
@@ -125,8 +128,8 @@ export class ConcurrencyTrackingClaudeClient {
     return this.concurrent;
   }
 
-  async complete(request: ClaudeRequest): Promise<ClaudeResponse> {
-    if (request.signal?.aborted) {
+  async createMessage(params: ClaudeMessageParams): Promise<ClaudeMessageResult> {
+    if (params.signal?.aborted) {
       throw new Error("Aborted");
     }
 
@@ -135,22 +138,43 @@ export class ConcurrencyTrackingClaudeClient {
 
     try {
       // Simulate work with a cancellable delay
-      await cancellableSleep(this.delayMs, request.signal);
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, this.delayMs);
+        if (params.signal) {
+          if (params.signal.aborted) {
+            clearTimeout(timer);
+            reject(new Error("Aborted"));
+            return;
+          }
+          params.signal.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              reject(new Error("Aborted"));
+            },
+            { once: true },
+          );
+        }
+      });
 
-      this.calls.push(request);
+      this.calls.push(params);
 
       if (
         this.failOnSkill &&
-        request.userMessage.includes(this.failOnSkill)
+        params.messages.some(
+          (m) => typeof m.content === "string" && m.content.includes(this.failOnSkill!),
+        )
       ) {
         throw new Error(`Simulated failure for skill: ${this.failOnSkill}`);
       }
 
       return {
         content: "Mock output for concurrent task",
+        model: "claude-sonnet-4-5-20250929",
         inputTokens: 100,
         outputTokens: 200,
         stopReason: "end_turn",
+        durationMs: this.delayMs,
       };
     } finally {
       this.concurrent--;

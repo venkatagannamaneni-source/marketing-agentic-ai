@@ -1,10 +1,10 @@
 /**
  * E2E Test Helpers — Bootstrap function wiring all 7 modules.
  *
- * Solves the core challenge: MarketingDirector uses ClaudeClient.createMessage()
- * (from src/agents/claude-client.ts), while SequentialPipelineEngine and
- * TaskQueueManager use ClaudeClient.complete() (from src/executor/types.ts).
- * bootstrapE2E() creates both mock clients and wires everything together.
+ * All modules now use the unified ClaudeClient.createMessage() interface
+ * from src/agents/claude-client.ts and the consolidated AgentExecutor
+ * from src/agents/executor.ts. bootstrapE2E() creates mock clients and
+ * wires everything together.
  */
 
 import { mkdtemp, rm } from "node:fs/promises";
@@ -14,11 +14,10 @@ import { tmpdir } from "node:os";
 // ── Workspace ─────────────────────────────────────────────────────────────────
 import { FileSystemWorkspaceManager } from "../../workspace/workspace-manager.ts";
 
-// ── Director (uses agents/claude-client.ts interface) ─────────────────────────
+// ── Director ─────────────────────────────────────────────────────────────────
 import { MarketingDirector } from "../../director/director.ts";
 import { PipelineFactory } from "../../director/pipeline-factory.ts";
 import type { BudgetState } from "../../director/types.ts";
-import type { ExecutorConfig as DirectorExecutorConfig } from "../../agents/executor.ts";
 import type {
   ClaudeClient as DirectorClaudeClient,
   ClaudeMessageParams,
@@ -26,12 +25,13 @@ import type {
 } from "../../agents/claude-client.ts";
 import { MODEL_MAP } from "../../agents/claude-client.ts";
 
-// ── Pipeline Engine (uses executor/types.ts interface) ────────────────────────
+// ── Unified Executor ─────────────────────────────────────────────────────────
+import { AgentExecutor } from "../../agents/executor.ts";
+import type { ExecutorConfig } from "../../agents/executor.ts";
+
+// ── Pipeline Engine ──────────────────────────────────────────────────────────
 import { SequentialPipelineEngine } from "../../pipeline/pipeline-engine.ts";
-import { AgentExecutor as PipelineAgentExecutor } from "../../executor/agent-executor.ts";
-import { MockClaudeClient as PipelineMockClaudeClient } from "../../executor/claude-client.ts";
-import { createDefaultConfig } from "../../executor/types.ts";
-import type { ClaudeRequest, ClaudeResponse } from "../../executor/types.ts";
+import type { ClaudeClient } from "../../agents/claude-client.ts";
 
 // ── Queue ─────────────────────────────────────────────────────────────────────
 import { TaskQueueManager } from "../../queue/task-queue.ts";
@@ -57,18 +57,14 @@ const PROJECT_ROOT = resolve(import.meta.dir, "../../..");
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface E2EContext {
-  // Workspace
   workspace: FileSystemWorkspaceManager;
   tempDir: string;
-
-  // Director (uses agents/claude-client.ts interface)
   director: MarketingDirector;
   directorClient: DirectorClaudeClient & { calls: ClaudeMessageParams[] };
 
-  // Pipeline engine (uses executor/types.ts interface)
+  // Single executor (replaces separate pipelineExecutor)
   pipelineEngine: SequentialPipelineEngine;
-  pipelineClient: PipelineMockClaudeClient;
-  pipelineExecutor: PipelineAgentExecutor;
+  pipelineClient: MockPipelineClient;
   pipelineFactory: PipelineFactory;
 
   // Queue
@@ -78,15 +74,9 @@ export interface E2EContext {
   mockQueue: MockQueueAdapter;
   mockWorker: MockWorkerAdapter;
   mockRedis: MockRedisClient;
-
-  // Worker processor (for manual queue simulation)
   createProcessor: () => ProcessorFn;
-
-  // Budget (mutable via setBudget)
   getBudget: () => BudgetState;
   setBudget: (state: BudgetState) => void;
-
-  // Cleanup
   cleanup: () => Promise<void>;
 }
 
@@ -95,7 +85,7 @@ export interface BootstrapOptions {
     params: ClaudeMessageParams,
     callIndex: number,
   ) => Partial<ClaudeMessageResult>;
-  pipelineClientGenerator?: (request: ClaudeRequest) => ClaudeResponse;
+  pipelineClientGenerator?: (params: ClaudeMessageParams) => Partial<ClaudeMessageResult>;
 }
 
 // ── Bootstrap Function ────────────────────────────────────────────────────────
@@ -120,7 +110,7 @@ export async function bootstrapE2E(
   );
 
   // 3. Director's ExecutorConfig (for executeAndReviewTask)
-  const directorExecutorConfig: DirectorExecutorConfig = {
+  const directorExecutorConfig: ExecutorConfig = {
     projectRoot: PROJECT_ROOT,
     defaultModel: "sonnet",
     defaultTimeoutMs: 120_000,
@@ -137,19 +127,21 @@ export async function bootstrapE2E(
     directorExecutorConfig,
   );
 
-  // 5. Create Pipeline's MockClaudeClient (executor/types.ts interface)
-  const pipelineClient = new PipelineMockClaudeClient(
+  // 5. Create Pipeline's mock ClaudeClient (modern interface)
+  const pipelineClient = createPipelineMockClient(
     options?.pipelineClientGenerator ?? defaultPipelineResponseGenerator,
   );
 
-  // 6. Pipeline's ExecutorConfig + AgentExecutor
-  const pipelineExecutorConfig = createDefaultConfig({
+  // 6. Pipeline's ExecutorConfig + AgentExecutor (unified)
+  const pipelineExecutorConfig: ExecutorConfig = {
     projectRoot: PROJECT_ROOT,
-    maxRetries: 0,
-    retryDelayMs: 10,
+    defaultModel: "sonnet",
     defaultTimeoutMs: 30_000,
-  });
-  const pipelineExecutor = new PipelineAgentExecutor(
+    defaultMaxTokens: 8192,
+    maxRetries: 0,
+    maxContextTokens: 150_000,
+  };
+  const pipelineExecutor = new AgentExecutor(
     pipelineClient,
     workspace,
     pipelineExecutorConfig,
@@ -221,7 +213,6 @@ export async function bootstrapE2E(
     directorClient,
     pipelineEngine,
     pipelineClient,
-    pipelineExecutor,
     pipelineFactory,
     queueManager,
     completionRouter,
@@ -272,23 +263,40 @@ The output is ready for review or handoff to the next pipeline step.
 }
 
 function defaultPipelineResponseGenerator(
-  request: ClaudeRequest,
-): ClaudeResponse {
-  // Extract skill name from user message if possible
-  const skillMatch = request.userMessage.match(
-    /\*\*Skill:\*\*\s+(\S+)/,
-  );
-  const taskMatch = request.userMessage.match(
-    /\*\*Task ID:\*\*\s+(\S+)/,
-  );
+  params: ClaudeMessageParams,
+): Partial<ClaudeMessageResult> {
+  const userMessage = params.messages.find(m => m.role === 'user')?.content ?? '';
+  const skillMatch = typeof userMessage === 'string' ? userMessage.match(/\*\*Skill:\*\*\s+(\S+)/) : null;
+  const taskMatch = typeof userMessage === 'string' ? userMessage.match(/\*\*Task ID:\*\*\s+(\S+)/) : null;
   const skill = skillMatch?.[1] ?? "agent";
   const taskId = taskMatch?.[1] ?? "unknown-task";
+  return { content: generateMockOutput(skill, taskId) };
+}
 
-  return {
-    content: generateMockOutput(skill, taskId),
+export type MockPipelineClient = ClaudeClient & { calls: ClaudeMessageParams[] };
+
+function createPipelineMockClient(
+  generator?: (params: ClaudeMessageParams) => Partial<ClaudeMessageResult>,
+): MockPipelineClient {
+  const calls: ClaudeMessageParams[] = [];
+  const defaultResult: ClaudeMessageResult = {
+    content: "Mock output for task",
+    model: "claude-sonnet-4-5-20250929",
     inputTokens: 500,
     outputTokens: 300,
     stopReason: "end_turn",
+    durationMs: 100,
+  };
+
+  return {
+    calls,
+    async createMessage(params: ClaudeMessageParams): Promise<ClaudeMessageResult> {
+      calls.push(params);
+      if (generator) {
+        return { ...defaultResult, ...generator(params) };
+      }
+      return defaultResult;
+    },
   };
 }
 

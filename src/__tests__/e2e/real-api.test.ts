@@ -14,19 +14,11 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import Anthropic from "@anthropic-ai/sdk";
 
-// ── Modern client (agents/ path) ────────────────────────────────────────────
+// ── Claude Client + Executor ─────────────────────────────────────────────────
 import { AnthropicClaudeClient } from "../../agents/claude-client.ts";
 import { MODEL_MAP } from "../../agents/claude-client.ts";
-import { AgentExecutor as ModularAgentExecutor } from "../../agents/executor.ts";
-import type { ExecutorConfig as ModernExecutorConfig } from "../../agents/executor.ts";
-
-// ── Legacy client (executor/ path) ──────────────────────────────────────────
-import { AnthropicClaudeClient as LegacyAnthropicClaudeClient } from "../../executor/claude-client.ts";
-import { AgentExecutor as LegacyAgentExecutor } from "../../executor/agent-executor.ts";
-import { createDefaultConfig } from "../../executor/types.ts";
-
-// ── Adapters ────────────────────────────────────────────────────────────────
-import { ModernToLegacyClientAdapter } from "../../agents/client-adapter.ts";
+import { AgentExecutor } from "../../agents/executor.ts";
+import type { ExecutorConfig } from "../../agents/executor.ts";
 
 // ── Workspace ───────────────────────────────────────────────────────────────
 import { FileSystemWorkspaceManager } from "../../workspace/workspace-manager.ts";
@@ -127,38 +119,9 @@ describe.skipIf(!HAS_API_KEY)("E2E: Real Claude API", () => {
     }, 30_000);
   });
 
-  // ── Test 2: Raw Legacy Client ─────────────────────────────────────────
+  // ── Test 2: AgentExecutor with Real Skill ──────────────────────────────
 
-  describe("Legacy AnthropicClaudeClient (executor/)", () => {
-    it("makes a real API call via complete() interface", async () => {
-      const client = new LegacyAnthropicClaudeClient({
-        apiKey: API_KEY!,
-      });
-
-      const result = await client.complete({
-        model: HAIKU_MODEL,
-        systemPrompt: "You are a helpful assistant. Be very concise.",
-        userMessage: "What is the capital of France? Reply in one word.",
-        maxTokens: 50,
-      });
-
-      console.log("[Legacy Client] Response:", result.content);
-      console.log(
-        `[Legacy Client] Tokens: ${result.inputTokens} in / ${result.outputTokens} out`,
-      );
-      console.log(`[Legacy Client] Stop reason: ${result.stopReason}`);
-
-      expect(result.content).toBeTruthy();
-      expect(result.content.toLowerCase()).toContain("paris");
-      expect(result.inputTokens).toBeGreaterThan(0);
-      expect(result.outputTokens).toBeGreaterThan(0);
-      expect(result.stopReason).toBe("end_turn");
-    }, 30_000);
-  });
-
-  // ── Test 3: Modern AgentExecutor with Real Skill ──────────────────────
-
-  describe("ModularAgentExecutor with real Claude", () => {
+  describe("AgentExecutor with real Claude", () => {
     let workspace: FileSystemWorkspaceManager;
     let tempDir: string;
 
@@ -181,7 +144,7 @@ describe.skipIf(!HAS_API_KEY)("E2E: Real Claude API", () => {
         new Anthropic({ apiKey: API_KEY }),
       );
 
-      const config: ModernExecutorConfig = {
+      const config: ExecutorConfig = {
         projectRoot: PROJECT_ROOT,
         defaultModel: "haiku",
         defaultTimeoutMs: 60_000,
@@ -190,7 +153,7 @@ describe.skipIf(!HAS_API_KEY)("E2E: Real Claude API", () => {
         maxContextTokens: 150_000,
       };
 
-      const executor = new ModularAgentExecutor(client, workspace, config);
+      const executor = new AgentExecutor(client, workspace, config);
 
       // Create a real task for the marketing-ideas skill
       const task: Task = {
@@ -222,7 +185,7 @@ describe.skipIf(!HAS_API_KEY)("E2E: Real Claude API", () => {
       await workspace.writeTask(task);
 
       // Execute with haiku budget override
-      const result = await executor.executeTask(task, HAIKU_BUDGET);
+      const result = await executor.execute(task, { budgetState: HAIKU_BUDGET });
 
       console.log("\n[Executor] Real marketing-ideas output:");
       console.log("─".repeat(60));
@@ -263,102 +226,7 @@ describe.skipIf(!HAS_API_KEY)("E2E: Real Claude API", () => {
     }, 60_000);
   });
 
-  // ── Test 4: Legacy Pipeline Executor ──────────────────────────────────
-
-  describe("Legacy AgentExecutor with real Claude", () => {
-    let workspace: FileSystemWorkspaceManager;
-    let tempDir: string;
-
-    beforeEach(async () => {
-      tempDir = await mkdtemp(join(tmpdir(), "real-api-legacy-"));
-      workspace = new FileSystemWorkspaceManager({ rootDir: tempDir });
-      await workspace.init();
-      await workspace.writeFile(
-        "context/product-marketing-context.md",
-        PRODUCT_CONTEXT,
-      );
-    });
-
-    afterEach(async () => {
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    it("executes a real task via legacy executor (pipeline path)", async () => {
-      const client = new LegacyAnthropicClaudeClient({
-        apiKey: API_KEY!,
-      });
-
-      const config = createDefaultConfig({
-        projectRoot: PROJECT_ROOT,
-        defaultModelTier: "haiku",
-        defaultTimeoutMs: 60_000,
-        defaultMaxTokens: 2048,
-        maxRetries: 0,
-      });
-
-      const executor = new LegacyAgentExecutor(client, workspace, config);
-
-      const task: Task = {
-        id: "real-api-legacy-001",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        from: "director",
-        to: "seo-audit",
-        priority: "P2",
-        deadline: null,
-        status: "pending",
-        revisionCount: 0,
-        goalId: "test-goal-002",
-        pipelineId: null,
-        goal: "Perform a quick SEO audit checklist",
-        inputs: [],
-        requirements:
-          "Provide a brief 5-point SEO audit checklist for a B2B SaaS marketing automation website. Keep it under 300 words. Focus on the most impactful technical SEO items.",
-        output: {
-          path: "outputs/measure/seo-audit/real-api-legacy-001.md",
-          format: "markdown",
-        },
-        next: { type: "complete" },
-        tags: ["real-api-test"],
-        metadata: {},
-      };
-
-      await workspace.writeTask(task);
-
-      const result = await executor.execute(task);
-
-      console.log("\n[Legacy Executor] Real seo-audit output:");
-      console.log("─".repeat(60));
-      console.log((result.outputPath ? await workspace.readFile(result.outputPath) : "no output").slice(0, 800));
-      console.log("─".repeat(60));
-      console.log(`[Legacy Executor] Status: ${result.status}`);
-      console.log(
-        `[Legacy Executor] Tokens: ${result.tokensUsed.input} in / ${result.tokensUsed.output} out (${result.tokensUsed.total} total)`,
-      );
-      console.log(`[Legacy Executor] Duration: ${result.durationMs}ms`);
-
-      expect(result.status).toBe("completed");
-      expect(result.skill).toBe("seo-audit");
-      expect(result.outputPath).toBeTruthy();
-      expect(result.tokensUsed.total).toBeGreaterThan(0);
-      expect(result.durationMs).toBeGreaterThan(0);
-      expect(result.error).toBeUndefined();
-
-      // Verify output was written
-      const output = await workspace.readOutput(
-        "measure",
-        "seo-audit",
-        "real-api-legacy-001",
-      );
-      expect(output.length).toBeGreaterThan(100);
-
-      // Verify task status
-      const updatedTask = await workspace.readTask("real-api-legacy-001");
-      expect(updatedTask.status).toBe("completed");
-    }, 60_000);
-  });
-
-  // ── Test 5: Full Pipeline with Real API ───────────────────────────────
+  // ── Test 3: Full Pipeline with Real API ───────────────────────────────
 
   describe("Full pipeline: Goal → Director → Pipeline → Real Claude", () => {
     let workspace: FileSystemWorkspaceManager;
@@ -379,14 +247,13 @@ describe.skipIf(!HAS_API_KEY)("E2E: Real Claude API", () => {
     });
 
     it("runs a full content pipeline with real Claude API calls", async () => {
-      // 1. Create real Claude client (modern) + adapt to legacy for pipeline
+      // 1. Create real Claude client
       const modernClient = new AnthropicClaudeClient(
         new Anthropic({ apiKey: API_KEY }),
       );
-      const legacyClient = new ModernToLegacyClientAdapter(modernClient);
 
       // 2. Set up Director with real client (for reviews)
-      const directorExecutorConfig: ModernExecutorConfig = {
+      const directorExecutorConfig: ExecutorConfig = {
         projectRoot: PROJECT_ROOT,
         defaultModel: "haiku",
         defaultTimeoutMs: 60_000,
@@ -402,17 +269,18 @@ describe.skipIf(!HAS_API_KEY)("E2E: Real Claude API", () => {
         directorExecutorConfig,
       );
 
-      // 3. Set up Pipeline with real client
-      const pipelineConfig = createDefaultConfig({
+      // 3. Set up Pipeline with unified AgentExecutor
+      const pipelineConfig: ExecutorConfig = {
         projectRoot: PROJECT_ROOT,
-        defaultModelTier: "haiku",
+        defaultModel: "haiku",
         defaultTimeoutMs: 60_000,
         defaultMaxTokens: 2048,
         maxRetries: 0,
-      });
+        maxContextTokens: 150_000,
+      };
 
-      const pipelineExecutor = new LegacyAgentExecutor(
-        legacyClient,
+      const pipelineExecutor = new AgentExecutor(
+        modernClient,
         workspace,
         pipelineConfig,
       );
@@ -473,7 +341,7 @@ describe.skipIf(!HAS_API_KEY)("E2E: Real Claude API", () => {
             ? stepResult.step.skills.join(", ")
             : "review";
         const tokens = stepResult.executionResults.reduce(
-          (sum, r) => sum + r.tokensUsed.total,
+          (sum, r) => sum + r.metadata.inputTokens + r.metadata.outputTokens,
           0,
         );
         console.log(
@@ -488,7 +356,7 @@ describe.skipIf(!HAS_API_KEY)("E2E: Real Claude API", () => {
       for (const stepResult of pipelineResult.stepResults) {
         expect(stepResult.status).toBe("completed");
         const tokens = stepResult.executionResults.reduce(
-          (sum, r) => sum + r.tokensUsed.total,
+          (sum, r) => sum + r.metadata.inputTokens + r.metadata.outputTokens,
           0,
         );
         expect(tokens).toBeGreaterThan(0);

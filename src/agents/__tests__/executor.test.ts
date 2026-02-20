@@ -112,7 +112,7 @@ afterEach(async () => {
 });
 
 describe("AgentExecutor", () => {
-  describe("executeTask — happy path", () => {
+  describe("execute — happy path", () => {
     it("executes task and returns result", async () => {
       const client = createMockClient();
       const executor = new AgentExecutor(
@@ -123,7 +123,7 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask();
       await tw.workspace.writeTask(task);
 
-      const result = await executor.executeTask(task);
+      const result = await executor.execute(task);
 
       expect(result.taskId).toBe(task.id);
       expect(result.content).toContain("Page CRO Audit");
@@ -143,7 +143,7 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask();
       await tw.workspace.writeTask(task);
 
-      await executor.executeTask(task);
+      await executor.execute(task);
 
       expect(client.calls.length).toBe(1);
       // page-cro is Convert Squad → sonnet
@@ -160,7 +160,7 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask({ to: "content-strategy" });
       await tw.workspace.writeTask(task);
 
-      await executor.executeTask(task);
+      await executor.execute(task);
 
       expect(client.calls[0]!.model).toBe(MODEL_MAP.opus);
     });
@@ -177,7 +177,7 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask();
       await tw.workspace.writeTask(task);
 
-      await executor.executeTask(task);
+      await executor.execute(task);
 
       const output = await tw.workspace.readOutput(
         "convert",
@@ -205,7 +205,7 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask();
       await tw.workspace.writeTask(task);
 
-      await executor.executeTask(task);
+      await executor.execute(task);
 
       expect(statusHistory).toEqual(["in_progress", "completed"]);
     });
@@ -223,7 +223,7 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask();
       await tw.workspace.writeTask(task);
 
-      const result = await executor.executeTask(task);
+      const result = await executor.execute(task);
 
       // sonnet: (10000 * 3 + 5000 * 15) / 1_000_000 = 0.105
       expect(result.metadata.estimatedCost).toBeCloseTo(0.105, 4);
@@ -243,7 +243,7 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask({ to: "product-marketing-context" });
       await tw.workspace.writeTask(task);
 
-      await executor.executeTask(task);
+      await executor.execute(task);
 
       const content = await tw.workspace.readContext();
       expect(content).toBe("# Product Context\n\nOur product...");
@@ -267,7 +267,7 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask();
       await tw.workspace.writeTask(task);
 
-      const result = await executor.executeTask(task);
+      const result = await executor.execute(task);
 
       expect(result.truncated).toBe(true);
       expect(result.metadata.retryCount).toBe(1);
@@ -293,7 +293,7 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask();
       await tw.workspace.writeTask(task);
 
-      const result = await executor.executeTask(task);
+      const result = await executor.execute(task);
 
       expect(result.truncated).toBe(false);
       expect(result.content).toBe("# Complete Output\n\nDone.");
@@ -302,7 +302,7 @@ describe("AgentExecutor", () => {
   });
 
   describe("budget integration", () => {
-    it("throws BUDGET_EXHAUSTED when level is exhausted", async () => {
+    it("returns BUDGET_EXHAUSTED when level is exhausted", async () => {
       const client = createMockClient();
       const executor = new AgentExecutor(
         client,
@@ -321,13 +321,10 @@ describe("AgentExecutor", () => {
         modelOverride: null,
       };
 
-      try {
-        await executor.executeTask(task, budget);
-        expect(true).toBe(false); // Should not reach
-      } catch (err) {
-        expect(err).toBeInstanceOf(ExecutionError);
-        expect((err as ExecutionError).code).toBe("BUDGET_EXHAUSTED");
-      }
+      const result = await executor.execute(task, { budgetState: budget });
+      expect(result.status).toBe("failed");
+      expect(result.error).toBeInstanceOf(ExecutionError);
+      expect(result.error?.code).toBe("BUDGET_EXHAUSTED");
     });
 
     it("uses haiku when budget override is haiku", async () => {
@@ -345,11 +342,11 @@ describe("AgentExecutor", () => {
         spent: 960,
         percentUsed: 96,
         level: "critical",
-        allowedPriorities: ["P0"],
+        allowedPriorities: ["P0", "P1", "P2"],
         modelOverride: "haiku",
       };
 
-      await executor.executeTask(task, budget);
+      await executor.execute(task, { budgetState: budget });
 
       expect(client.calls[0]!.model).toBe(MODEL_MAP.haiku);
     });
@@ -359,7 +356,7 @@ describe("AgentExecutor", () => {
     it("sets task status to failed on API error", async () => {
       const client: ClaudeClient = {
         createMessage: async () => {
-          throw new ExecutionError("API error", "API_ERROR", false);
+          throw new ExecutionError("API error", "API_ERROR", "", false);
         },
       };
       const executor = new AgentExecutor(
@@ -370,12 +367,8 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask();
       await tw.workspace.writeTask(task);
 
-      try {
-        await executor.executeTask(task);
-        expect(true).toBe(false);
-      } catch {
-        // Expected
-      }
+      const result = await executor.execute(task);
+      expect(result.status).toBe("failed");
 
       const updatedTask = await tw.workspace.readTask(task.id);
       expect(updatedTask.status).toBe("failed");
@@ -383,7 +376,7 @@ describe("AgentExecutor", () => {
   });
 
   describe("EC-7: invalid projectRoot", () => {
-    it("throws clear error when skills directory does not exist", async () => {
+    it("returns clear error when skills directory does not exist", async () => {
       const client = createMockClient();
       const executor = new AgentExecutor(
         client,
@@ -393,12 +386,9 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask();
       await tw.workspace.writeTask(task);
 
-      try {
-        await executor.executeTask(task);
-        expect(true).toBe(false);
-      } catch (err) {
-        expect((err as Error).message).toContain("Skills directory not found");
-      }
+      const result = await executor.execute(task);
+      expect(result.status).toBe("failed");
+      expect(result.error?.message).toContain("Skills directory not found");
     });
   });
 
@@ -420,7 +410,7 @@ describe("AgentExecutor", () => {
       });
       await tw.workspace.writeTask(task);
 
-      const result = await executor.executeTask(task);
+      const result = await executor.execute(task);
 
       expect(result.missingInputs).toContain(
         "outputs/strategy/content-strategy/nonexistent.md",
@@ -439,9 +429,9 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask({ status: "completed" });
       await tw.workspace.writeTask(task);
 
-      await expect(executor.executeTask(task)).rejects.toThrow(
-        "not executable",
-      );
+      const result = await executor.execute(task);
+      expect(result.status).toBe("failed");
+      expect(result.error?.message).toContain("not executable");
     });
 
     it("rejects tasks with approved status", async () => {
@@ -454,9 +444,9 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask({ status: "approved" });
       await tw.workspace.writeTask(task);
 
-      await expect(executor.executeTask(task)).rejects.toThrow(
-        "not executable",
-      );
+      const result = await executor.execute(task);
+      expect(result.status).toBe("failed");
+      expect(result.error?.message).toContain("not executable");
     });
 
     it("accepts tasks with revision status", async () => {
@@ -469,11 +459,11 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask({ status: "revision" });
       await tw.workspace.writeTask(task);
 
-      const result = await executor.executeTask(task);
+      const result = await executor.execute(task);
       expect(result.taskId).toBe(task.id);
     });
 
-    it("throws TASK_NOT_EXECUTABLE error code", async () => {
+    it("returns TASK_NOT_EXECUTABLE error code", async () => {
       const client = createMockClient();
       const executor = new AgentExecutor(
         client,
@@ -483,15 +473,10 @@ describe("AgentExecutor", () => {
       const task = createExecutorTask({ status: "failed" });
       await tw.workspace.writeTask(task);
 
-      try {
-        await executor.executeTask(task);
-        expect(true).toBe(false);
-      } catch (err) {
-        expect(err).toBeInstanceOf(ExecutionError);
-        expect((err as typeof ExecutionError.prototype).code).toBe(
-          "TASK_NOT_EXECUTABLE",
-        );
-      }
+      const result = await executor.execute(task);
+      expect(result.status).toBe("failed");
+      expect(result.error).toBeInstanceOf(ExecutionError);
+      expect(result.error?.code).toBe("TASK_NOT_EXECUTABLE");
     });
   });
 
@@ -522,9 +507,221 @@ describe("AgentExecutor", () => {
       await tw.workspace.writeTask(task);
 
       const controller = new AbortController();
-      await executor.executeTask(task, undefined, controller.signal);
+      await executor.execute(task, { signal: controller.signal });
 
       expect(capturedSignal).toBe(controller.signal);
+    });
+
+    it("returns ABORTED immediately for pre-aborted signal", async () => {
+      const client = createMockClient();
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const controller = new AbortController();
+      controller.abort();
+      const result = await executor.execute(task, { signal: controller.signal });
+
+      expect(result.status).toBe("failed");
+      expect(result.error?.code).toBe("ABORTED");
+      expect(client.calls.length).toBe(0); // Should not have called the client
+    });
+  });
+
+  describe("executeOrThrow", () => {
+    it("returns result on success", async () => {
+      const client = createMockClient();
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.executeOrThrow(task);
+      expect(result.status).toBe("completed");
+      expect(result.content).toContain("Page CRO Audit");
+    });
+
+    it("throws ExecutionError on failure", async () => {
+      const client: ClaudeClient = {
+        createMessage: async () => {
+          throw new ExecutionError("API error", "API_ERROR", "", false);
+        },
+      };
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      await expect(executor.executeOrThrow(task)).rejects.toThrow(ExecutionError);
+    });
+  });
+
+  describe("never-throws contract", () => {
+    it("returns failed result when client throws non-ExecutionError", async () => {
+      const client: ClaudeClient = {
+        createMessage: async () => {
+          throw new TypeError("unexpected runtime error");
+        },
+      };
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      // execute() should NEVER throw, even for unexpected errors
+      const result = await executor.execute(task);
+      expect(result.status).toBe("failed");
+      expect(result.error?.code).toBe("API_ERROR");
+      expect(result.error?.taskId).toBe(task.id);
+    });
+  });
+
+  describe("empty response validation", () => {
+    it("returns RESPONSE_EMPTY for empty content", async () => {
+      const client = createMockClient({ content: "" });
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task);
+      expect(result.status).toBe("failed");
+      expect(result.error?.code).toBe("RESPONSE_EMPTY");
+    });
+
+    it("returns RESPONSE_EMPTY for whitespace-only content", async () => {
+      const client = createMockClient({ content: "   \n\t  " });
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task);
+      expect(result.status).toBe("failed");
+      expect(result.error?.code).toBe("RESPONSE_EMPTY");
+    });
+  });
+
+  describe("truncation warnings", () => {
+    it("includes warning when both calls are truncated", async () => {
+      const client = createMockClient((_params, callIndex) => {
+        return { stopReason: "max_tokens", content: `Truncated ${callIndex}` };
+      });
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task);
+      expect(result.truncated).toBe(true);
+      expect(result.warnings).toContain(
+        "Response truncated (max_tokens reached) — retry also truncated",
+      );
+      // Should use retry content (more concise), not original
+      expect(result.content).toBe("Truncated 1");
+    });
+  });
+
+  describe("budget priority gating", () => {
+    it("rejects task when priority not in allowedPriorities", async () => {
+      const client = createMockClient();
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask({ priority: "P3" });
+      await tw.workspace.writeTask(task);
+
+      const budget: BudgetState = {
+        totalBudget: 1000,
+        spent: 800,
+        percentUsed: 80,
+        level: "critical",
+        allowedPriorities: ["P0"],
+        modelOverride: "haiku",
+      };
+
+      const result = await executor.execute(task, { budgetState: budget });
+      expect(result.status).toBe("failed");
+      expect(result.error?.code).toBe("BUDGET_EXHAUSTED");
+      expect(result.error?.message).toContain("P3");
+      expect(client.calls.length).toBe(0); // Should not have called the client
+    });
+  });
+
+  describe("abort skips truncation retry", () => {
+    it("returns truncated result without retrying when aborted between calls", async () => {
+      const controller = new AbortController();
+      const client = createMockClient((_params, callIndex) => {
+        if (callIndex === 0) {
+          // First call returns truncated — then we abort before retry
+          controller.abort();
+          return { stopReason: "max_tokens", content: "Partial content" };
+        }
+        // Should never reach here
+        return { content: "Retry content" };
+      });
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task, { signal: controller.signal });
+
+      // Should be completed with truncated content (no retry attempted)
+      expect(result.status).toBe("completed");
+      expect(result.truncated).toBe(true);
+      expect(result.content).toBe("Partial content");
+      expect(client.calls.length).toBe(1); // Only one call, retry was skipped
+    });
+  });
+
+  describe("API error taskId propagation", () => {
+    it("sets correct taskId on API errors from client", async () => {
+      const client: ClaudeClient = {
+        createMessage: async () => {
+          // Client throws with empty taskId (as AnthropicClaudeClient does)
+          throw new ExecutionError("Rate limited", "RATE_LIMITED", "", false);
+        },
+      };
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task);
+      expect(result.status).toBe("failed");
+      expect(result.error?.taskId).toBe(task.id);
+      expect(result.error?.code).toBe("RATE_LIMITED");
     });
   });
 });

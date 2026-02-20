@@ -120,9 +120,20 @@ describe("E2E: Queue Orchestration", () => {
       taskId: task.id,
       skill: task.to,
       status: "completed" as const,
+      content: "",
       outputPath: task.output.path,
-      tokensUsed: { input: 100, output: 200, total: 300 },
-      durationMs: 1000,
+      metadata: {
+        model: "claude-sonnet-4-5-20250929",
+        modelTier: "sonnet" as const,
+        inputTokens: 100,
+        outputTokens: 200,
+        durationMs: 1000,
+        estimatedCost: 0.003,
+        retryCount: 0,
+      },
+      truncated: false,
+      missingInputs: [] as string[],
+      warnings: [] as string[],
     };
 
     const action = await ctx.completionRouter.route(reviewTask, executionResult);
@@ -169,9 +180,20 @@ describe("E2E: Queue Orchestration", () => {
       taskId: task.id,
       skill: task.to,
       status: "completed" as const,
+      content: "",
       outputPath: task.output.path,
-      tokensUsed: { input: 100, output: 200, total: 300 },
-      durationMs: 1000,
+      metadata: {
+        model: "claude-sonnet-4-5-20250929",
+        modelTier: "sonnet" as const,
+        inputTokens: 100,
+        outputTokens: 200,
+        durationMs: 1000,
+        estimatedCost: 0.003,
+        retryCount: 0,
+      },
+      truncated: false,
+      missingInputs: [] as string[],
+      warnings: [] as string[],
     };
 
     const action = await ctx.completionRouter.route(task, executionResult);

@@ -1,6 +1,6 @@
 import type { Task, Priority } from "../types/task.ts";
 import type { ComponentHealth } from "../types/health.ts";
-import type { ExecutionResult } from "../executor/types.ts";
+import type { ExecutionResult } from "../agents/executor.ts";
 
 // ── Redis Configuration ─────────────────────────────────────────────────────
 

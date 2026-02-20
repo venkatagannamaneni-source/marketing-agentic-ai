@@ -1,5 +1,5 @@
 import type { WorkspaceManager } from "../workspace/workspace-manager.ts";
-import type { AgentExecutor } from "../executor/agent-executor.ts";
+import type { AgentExecutor } from "../agents/executor.ts";
 import type { BudgetState } from "../director/types.ts";
 import type { ProcessorFn, QueueJobResult } from "./types.ts";
 import { BudgetDeferralError, CascadePauseError, TaskExecutionError } from "./types.ts";
@@ -37,21 +37,15 @@ export function createWorkerProcessor(deps: WorkerProcessorDeps): ProcessorFn {
     // Step 3: Read the full task from workspace
     const task = await workspace.readTask(taskId);
 
-    // Step 4: Determine agent config (model override from budget)
-    const agentConfig = budget.modelOverride
-      ? {
-          skill: task.to,
-          modelTier: budget.modelOverride,
-          timeoutMs: 120_000,
-          maxRetries: 2,
-        }
-      : undefined;
+    // Step 4: Execute via AgentExecutor (passes budgetState for model selection)
+    const result = await executor.execute(task, { budgetState: budget });
 
-    // Step 5: Execute via AgentExecutor
-    const result = await executor.execute(task, { agentConfig });
-
-    // Step 6: Handle failure
+    // Step 5: Handle failure
     if (result.status === "failed") {
+      // Budget exhaustion should not be retried by BullMQ
+      if (result.error?.code === "BUDGET_EXHAUSTED") {
+        throw new BudgetDeferralError(taskId, priority, budget.level);
+      }
       failureTracker.recordFailure(taskId, pipelineId);
       throw new TaskExecutionError(
         result.error?.message ?? `Task ${taskId} execution failed`,
@@ -59,10 +53,10 @@ export function createWorkerProcessor(deps: WorkerProcessorDeps): ProcessorFn {
       );
     }
 
-    // Step 7: Record success
+    // Step 6: Record success
     failureTracker.recordSuccess(taskId, pipelineId);
 
-    // Step 8: Route completion
+    // Step 7: Route completion
     const routingAction = await completionRouter.route(task, result);
 
     return { executionResult: result, routingAction };

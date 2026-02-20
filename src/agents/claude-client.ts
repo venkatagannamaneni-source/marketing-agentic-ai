@@ -33,17 +33,26 @@ export interface ClaudeMessageResult {
 // ── Error ────────────────────────────────────────────────────────────────────
 
 export type ExecutionErrorCode =
-  | "RATE_LIMITED"
+  // Skill/input resolution
+  | "SKILL_NOT_FOUND"
+  | "INPUT_NOT_FOUND"
+  // API errors
   | "API_ERROR"
+  | "RATE_LIMITED"
   | "TIMEOUT"
+  | "API_OVERLOADED"
+  // Response issues
+  | "RESPONSE_EMPTY"
   | "TRUNCATED"
   | "MALFORMED_OUTPUT"
+  // Budget/execution gating
   | "BUDGET_EXHAUSTED"
   | "TASK_NOT_EXECUTABLE"
-  | "ABORTED"
-  | "SKILL_NOT_FOUND"
-  | "RESPONSE_EMPTY"
+  // Workspace
   | "WORKSPACE_WRITE_FAILED"
+  // Cancellation
+  | "ABORTED"
+  // Catch-all
   | "UNKNOWN";
 
 export class ExecutionError extends Error {
@@ -52,6 +61,7 @@ export class ExecutionError extends Error {
   constructor(
     message: string,
     readonly code: ExecutionErrorCode,
+    readonly taskId: string,
     readonly retryable: boolean,
     override readonly cause?: Error,
   ) {
@@ -139,6 +149,11 @@ export class AnthropicClaudeClient implements ClaudeClient {
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
+      // Check abort before each attempt (catches abort during backoff sleep)
+      if (params.signal?.aborted) {
+        throw new ExecutionError("Request aborted", "ABORTED", "", false);
+      }
+
       try {
         return await this.anthropic.messages.create(
           {
@@ -194,6 +209,7 @@ type ErrorClass =
   | "rate_limited"
   | "server_error"
   | "timeout"
+  | "aborted"
   | "non_retryable";
 
 function classifyError(err: unknown): ErrorClass {
@@ -210,9 +226,9 @@ function classifyError(err: unknown): ErrorClass {
     return "non_retryable";
   }
 
-  // Bun/Node timeout errors
+  // User-initiated abort (AbortSignal) — distinct from timeout
   if (err instanceof Error && err.name === "AbortError") {
-    return "timeout";
+    return "aborted";
   }
 
   return "non_retryable";
@@ -231,6 +247,7 @@ function toExecutionError(
       return new ExecutionError(
         `Rate limited after max retries: ${message}`,
         "RATE_LIMITED",
+        "",
         false,
         cause,
       );
@@ -238,6 +255,7 @@ function toExecutionError(
       return new ExecutionError(
         `Server error after max retries: ${message}`,
         "API_ERROR",
+        "",
         false,
         cause,
       );
@@ -245,10 +263,19 @@ function toExecutionError(
       return new ExecutionError(
         `Request timed out: ${message}`,
         "TIMEOUT",
+        "",
+        false,
+        cause,
+      );
+    case "aborted":
+      return new ExecutionError(
+        `Request aborted: ${message}`,
+        "ABORTED",
+        "",
         false,
         cause,
       );
     case "non_retryable":
-      return new ExecutionError(message, "API_ERROR", false, cause);
+      return new ExecutionError(message, "API_ERROR", "", false, cause);
   }
 }

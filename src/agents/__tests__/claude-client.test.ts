@@ -80,42 +80,55 @@ describe("estimateCost", () => {
 
 describe("ExecutionError", () => {
   it("has correct name", () => {
-    const err = new ExecutionError("test", "API_ERROR", false);
+    const err = new ExecutionError("test", "API_ERROR", "", false);
     expect(err.name).toBe("ExecutionError");
   });
 
   it("has correct code", () => {
-    const err = new ExecutionError("test", "RATE_LIMITED", true);
+    const err = new ExecutionError("test", "RATE_LIMITED", "", true);
     expect(err.code).toBe("RATE_LIMITED");
   });
 
+  it("has correct taskId", () => {
+    const err = new ExecutionError("test", "API_ERROR", "task-123", false);
+    expect(err.taskId).toBe("task-123");
+  });
+
   it("has correct retryable flag", () => {
-    const err = new ExecutionError("test", "TIMEOUT", true);
+    const err = new ExecutionError("test", "TIMEOUT", "", true);
     expect(err.retryable).toBe(true);
   });
 
   it("stores cause", () => {
     const cause = new Error("underlying");
-    const err = new ExecutionError("wrapped", "API_ERROR", false, cause);
+    const err = new ExecutionError("wrapped", "API_ERROR", "", false, cause);
     expect(err.cause).toBe(cause);
   });
 
   it("is an instance of Error", () => {
-    const err = new ExecutionError("test", "API_ERROR", false);
+    const err = new ExecutionError("test", "API_ERROR", "", false);
     expect(err instanceof Error).toBe(true);
   });
 
   it("has all valid error codes", () => {
     const codes: Array<ExecutionError["code"]> = [
-      "RATE_LIMITED",
+      "SKILL_NOT_FOUND",
+      "INPUT_NOT_FOUND",
       "API_ERROR",
+      "RATE_LIMITED",
       "TIMEOUT",
+      "API_OVERLOADED",
+      "RESPONSE_EMPTY",
       "TRUNCATED",
       "MALFORMED_OUTPUT",
       "BUDGET_EXHAUSTED",
+      "TASK_NOT_EXECUTABLE",
+      "WORKSPACE_WRITE_FAILED",
+      "ABORTED",
+      "UNKNOWN",
     ];
     for (const code of codes) {
-      const err = new ExecutionError("test", code, false);
+      const err = new ExecutionError("test", code, "", false);
       expect(err.code).toBe(code);
     }
   });

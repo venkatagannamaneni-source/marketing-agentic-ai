@@ -8,7 +8,7 @@ export {
 
 export { loadSkillMeta, loadAllSkills } from "./skill-loader.ts";
 
-// ── Claude Client ───────────────────────────────────────────────────────────
+// ── Claude Client ───────────────────────────────────────────────────────
 export type {
   ClaudeClient,
   ClaudeMessageParams,
@@ -24,23 +24,18 @@ export {
   AnthropicClaudeClient,
 } from "./claude-client.ts";
 
-// ── Model Selector ──────────────────────────────────────────────────────────
+// ── Model Selector ──────────────────────────────────────────────────────
 export { selectModelTier } from "./model-selector.ts";
 
-// ── Prompt Builder ──────────────────────────────────────────────────────────
+// ── Prompt Builder ──────────────────────────────────────────────────────
 export type { BuiltPrompt } from "./prompt-builder.ts";
 export { buildAgentPrompt } from "./prompt-builder.ts";
 
-// ── Agent Executor ──────────────────────────────────────────────────────────
+// ── Agent Executor ──────────────────────────────────────────────────────
 export type {
   ExecutorConfig,
   ExecutionResult,
   ExecutionMetadata,
+  ExecuteOptions,
 } from "./executor.ts";
 export { AgentExecutor, DEFAULT_EXECUTOR_CONFIG } from "./executor.ts";
-
-// ── Client Adapters ────────────────────────────────────────────────────────
-export {
-  ModernToLegacyClientAdapter,
-  LegacyToModernClientAdapter,
-} from "./client-adapter.ts";

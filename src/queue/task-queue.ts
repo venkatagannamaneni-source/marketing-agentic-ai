@@ -1,7 +1,7 @@
 import type { Task } from "../types/task.ts";
 import type { WorkspaceManager } from "../workspace/workspace-manager.ts";
 import type { MarketingDirector } from "../director/director.ts";
-import type { AgentExecutor } from "../executor/agent-executor.ts";
+import type { AgentExecutor } from "../agents/executor.ts";
 import type { BudgetState } from "../director/types.ts";
 import type {
   TaskQueueConfig,

@@ -5,9 +5,9 @@ import { resolve } from "node:path";
 import { TaskQueueManager } from "../task-queue.ts";
 import { FileSystemWorkspaceManager } from "../../workspace/workspace-manager.ts";
 import { MarketingDirector } from "../../director/director.ts";
-import { AgentExecutor } from "../../executor/agent-executor.ts";
-import { MockClaudeClient } from "../../executor/claude-client.ts";
-import { createDefaultConfig } from "../../executor/types.ts";
+import { AgentExecutor } from "../../agents/executor.ts";
+import type { ExecutorConfig } from "../../agents/executor.ts";
+import type { ClaudeClient, ClaudeMessageParams, ClaudeMessageResult } from "../../agents/claude-client.ts";
 import {
   MockQueueAdapter,
   MockWorkerAdapter,
@@ -18,6 +18,21 @@ import {
 } from "./helpers.ts";
 import { createRedisConnectionFromClient } from "../redis-connection.ts";
 import type { BudgetState } from "../../director/types.ts";
+
+function createMockClaudeClient(): ClaudeClient {
+  return {
+    async createMessage(params: ClaudeMessageParams): Promise<ClaudeMessageResult> {
+      return {
+        content: "Mock output for task",
+        model: "claude-sonnet-4-5-20250929",
+        inputTokens: 100,
+        outputTokens: 200,
+        stopReason: "end_turn",
+        durationMs: 100,
+      };
+    },
+  };
+}
 
 describe("TaskQueueManager", () => {
   let tempDir: string;
@@ -38,8 +53,15 @@ describe("TaskQueueManager", () => {
     await workspace.init();
     director = new MarketingDirector(workspace);
 
-    const mockClient = new MockClaudeClient();
-    const config = createDefaultConfig({ projectRoot: process.cwd() });
+    const mockClient = createMockClaudeClient();
+    const config: ExecutorConfig = {
+      projectRoot: process.cwd(),
+      defaultModel: "sonnet",
+      defaultTimeoutMs: 120_000,
+      defaultMaxTokens: 8192,
+      maxRetries: 0,
+      maxContextTokens: 150_000,
+    };
     executor = new AgentExecutor(mockClient, workspace, config);
 
     mockQueue = new MockQueueAdapter();
