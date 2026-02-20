@@ -414,11 +414,19 @@ describe("CostTracker", () => {
       expect(state.percentUsed).toBeGreaterThan(100);
     });
 
-    it("handles zero totalMonthly budget", () => {
+    it("handles zero totalMonthly budget with spending as exhausted", () => {
       tracker = new CostTracker({ budget: { totalMonthly: 0, warningPercent: 80, throttlePercent: 90, criticalPercent: 95 } });
       tracker.record(createTestCostEntry({ estimatedCost: 5 }));
       const state = tracker.toBudgetState();
-      // percentUsed = 0 when totalMonthly is 0 (avoid division by zero)
+      // Zero budget + nonzero spending → 100% used → exhausted
+      expect(state.percentUsed).toBe(100);
+      expect(state.level).toBe("exhausted");
+    });
+
+    it("handles zero totalMonthly budget with zero spending as normal", () => {
+      tracker = new CostTracker({ budget: { totalMonthly: 0, warningPercent: 80, throttlePercent: 90, criticalPercent: 95 } });
+      const state = tracker.toBudgetState();
+      // Zero budget + zero spending → 0% used → normal
       expect(state.percentUsed).toBe(0);
       expect(state.level).toBe("normal");
     });

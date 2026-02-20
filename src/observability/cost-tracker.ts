@@ -281,7 +281,9 @@ export class CostTracker {
   toBudgetState(): BudgetState {
     const spent = this.getTotalSpent();
     const totalBudget = this.config.budget.totalMonthly;
-    const percentUsed = totalBudget > 0 ? (spent / totalBudget) * 100 : 0;
+    // Zero budget with nonzero spending → treat as fully exhausted
+    const percentUsed =
+      totalBudget > 0 ? (spent / totalBudget) * 100 : spent > 0 ? 100 : 0;
 
     let level: BudgetLevel;
     let allowedPriorities: readonly Priority[];
@@ -368,6 +370,21 @@ export class CostTracker {
         lines.push(
           `| ${m.modelTier} | ${m.entryCount} | ${m.totalInputTokens} | ${m.totalOutputTokens} | ${formatDollars(m.totalCost)} |`,
         );
+      }
+    }
+
+    lines.push("");
+
+    // By Day
+    const dailySummaries = this.getDailyBreakdown();
+    lines.push("## By Day");
+    if (dailySummaries.length === 0) {
+      lines.push("No data collected.");
+    } else {
+      lines.push("| Date | Entries | Cost |");
+      lines.push("|------|---------|------|");
+      for (const d of dailySummaries) {
+        lines.push(`| ${d.date} | ${d.entryCount} | ${formatDollars(d.totalCost)} |`);
       }
     }
 
