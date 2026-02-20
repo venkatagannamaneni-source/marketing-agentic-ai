@@ -3,6 +3,7 @@ import type { AgentMeta } from "../types/agent.ts";
 import type { Task } from "../types/task.ts";
 import type { WorkspaceManager } from "../workspace/workspace-manager.ts";
 import { WorkspaceError } from "../workspace/errors.ts";
+import { parseLearnings } from "../workspace/markdown.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -12,6 +13,7 @@ export interface BuiltPrompt {
   readonly estimatedTokens: number;
   readonly missingInputs: readonly string[];
   readonly warnings: readonly string[];
+  readonly learningsIncluded: number;
 }
 
 // ── Default ──────────────────────────────────────────────────────────────────
@@ -58,12 +60,44 @@ export async function buildAgentPrompt(
     }
   }
 
-  // 2. Task requirements
+  // 2. Past learnings for this skill
+  let learningsIncluded = 0;
+  try {
+    const rawLearnings = await workspace.readLearnings();
+    if (rawLearnings) {
+      const allLearnings = parseLearnings(rawLearnings);
+      const relevant = allLearnings
+        .filter(l => l.agent === task.to)
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+        .slice(0, 10);
+
+      if (relevant.length > 0) {
+        const learningLines = relevant.map(l =>
+          `- [${l.outcome}] ${l.learning} → ${l.actionTaken}`
+        );
+
+        // Token budget: max 5% of context window for learnings
+        const learningsBudget = Math.floor(maxContextTokens * 0.05);
+        let learningsText = learningLines.join("\n");
+        while (estimateTokens("", learningsText) > learningsBudget && learningLines.length > 1) {
+          learningLines.pop();
+          learningsText = learningLines.join("\n");
+        }
+
+        learningsIncluded = learningLines.length;
+        parts.push(`<past-learnings>\n${learningsText}\n</past-learnings>`);
+      }
+    }
+  } catch {
+    // Learnings are supplementary — don't fail the prompt build
+  }
+
+  // 3. Task requirements
   parts.push(
     `<task-requirements>\n${task.requirements}\n</task-requirements>`,
   );
 
-  // 3. Previous output (revision detection via revisionCount — EC-6)
+  // 4. Previous output (revision detection via revisionCount — EC-6)
   if (task.revisionCount > 0) {
     try {
       const previousOutput = await workspace.readFile(task.output.path);
@@ -79,7 +113,7 @@ export async function buildAgentPrompt(
     }
   }
 
-  // 4. Input files
+  // 5. Input files
   for (const input of task.inputs) {
     try {
       const content = await workspace.readFile(input.path);
@@ -95,7 +129,7 @@ export async function buildAgentPrompt(
     }
   }
 
-  // 5. Reference materials — loaded last so they can be dropped if over budget
+  // 6. Reference materials — loaded last so they can be dropped if over budget
   const referenceParts: string[] = [];
   for (const refPath of agentMeta.referenceFiles) {
     try {
@@ -151,6 +185,7 @@ export async function buildAgentPrompt(
     estimatedTokens,
     missingInputs,
     warnings,
+    learningsIncluded,
   };
 }
 

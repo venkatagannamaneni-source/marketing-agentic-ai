@@ -51,4 +51,6 @@ export interface LearningEntry {
   readonly outcome: "success" | "failure" | "partial";
   readonly learning: string;
   readonly actionTaken: string;
+  readonly tags?: readonly string[];
+  readonly confidence?: number;
 }

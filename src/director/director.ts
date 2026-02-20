@@ -24,6 +24,7 @@ import { PipelineFactory } from "./pipeline-factory.ts";
 import { ReviewEngine } from "./review-engine.ts";
 import { EscalationEngine } from "./escalation.ts";
 import { routeGoal } from "./squad-router.ts";
+import { parseLearnings } from "../workspace/markdown.ts";
 import type { ClaudeClient } from "../agents/claude-client.ts";
 import { AgentExecutor } from "../agents/executor.ts";
 import type { ExecutorConfig, ExecutionResult } from "../agents/executor.ts";
@@ -80,6 +81,34 @@ export class MarketingDirector {
     priority?: Priority,
     deadline?: string,
   ): Promise<Goal> {
+    const metadata: Record<string, unknown> = {};
+
+    // Read learnings relevant to this goal category
+    try {
+      const rawLearnings = await this.workspace.readLearnings();
+      if (rawLearnings) {
+        const allLearnings = parseLearnings(rawLearnings);
+        const routing = this.routeGoal(category);
+        const relevantSkills = new Set<string>(
+          routing.routes.flatMap(r => [...r.skills]),
+        );
+        const relevant = allLearnings
+          .filter(l => relevantSkills.has(l.agent) || l.agent === "director")
+          .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+          .slice(0, 5);
+        if (relevant.length > 0) {
+          metadata.relevantLearnings = relevant.map(l => ({
+            agent: l.agent,
+            outcome: l.outcome,
+            learning: l.learning,
+            actionTaken: l.actionTaken,
+          }));
+        }
+      }
+    } catch {
+      // Non-fatal — learnings are supplementary
+    }
+
     const goal: Goal = {
       id: generateGoalId(),
       description,
@@ -87,7 +116,7 @@ export class MarketingDirector {
       priority: priority ?? this.config.defaultPriority,
       createdAt: new Date().toISOString(),
       deadline: deadline ?? null,
-      metadata: {},
+      metadata,
     };
 
     await this.workspace.writeGoal(goal);

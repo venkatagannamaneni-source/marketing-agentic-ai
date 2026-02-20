@@ -295,4 +295,169 @@ describe("buildAgentPrompt", () => {
     expect(contextIdx).toBeLessThan(reqIdx);
     expect(contextIdx).toBeGreaterThanOrEqual(0);
   });
+
+  // ── Learnings injection tests ───────────────────────────────────────────
+
+  it("includes relevant learnings for matching skill", async () => {
+    // Write learnings for page-cro
+    await tw.workspace.appendLearning({
+      timestamp: "2026-02-19T10:00:00.000Z",
+      agent: "page-cro",
+      goalId: null,
+      outcome: "success",
+      learning: "CTA above fold increases conversions",
+      actionTaken: "Always place CTA above fold",
+    });
+
+    const meta = await loadSkillMeta("page-cro", PROJECT_ROOT);
+    const task = createPromptTestTask();
+
+    const prompt = await buildAgentPrompt(
+      task,
+      meta,
+      tw.workspace,
+      PROJECT_ROOT,
+    );
+
+    expect(prompt.userMessage).toContain("<past-learnings>");
+    expect(prompt.userMessage).toContain("CTA above fold increases conversions");
+    expect(prompt.userMessage).toContain("</past-learnings>");
+    expect(prompt.learningsIncluded).toBe(1);
+  });
+
+  it("excludes learnings for non-matching skills", async () => {
+    // Write learnings for a different skill
+    await tw.workspace.appendLearning({
+      timestamp: "2026-02-19T10:00:00.000Z",
+      agent: "copywriting",
+      goalId: null,
+      outcome: "success",
+      learning: "Short headlines work better",
+      actionTaken: "Use short headlines",
+    });
+
+    const meta = await loadSkillMeta("page-cro", PROJECT_ROOT);
+    const task = createPromptTestTask(); // task.to = page-cro
+
+    const prompt = await buildAgentPrompt(
+      task,
+      meta,
+      tw.workspace,
+      PROJECT_ROOT,
+    );
+
+    expect(prompt.userMessage).not.toContain("<past-learnings>");
+    expect(prompt.learningsIncluded).toBe(0);
+  });
+
+  it("includes only matching learnings when mixed skills exist", async () => {
+    await tw.workspace.appendLearning({
+      timestamp: "2026-02-19T10:00:00.000Z",
+      agent: "page-cro",
+      goalId: null,
+      outcome: "success",
+      learning: "PAGE_CRO_LEARNING",
+      actionTaken: "PAGE_CRO_ACTION",
+    });
+    await tw.workspace.appendLearning({
+      timestamp: "2026-02-19T11:00:00.000Z",
+      agent: "copywriting",
+      goalId: null,
+      outcome: "failure",
+      learning: "COPYWRITING_LEARNING",
+      actionTaken: "COPYWRITING_ACTION",
+    });
+
+    const meta = await loadSkillMeta("page-cro", PROJECT_ROOT);
+    const task = createPromptTestTask();
+
+    const prompt = await buildAgentPrompt(
+      task,
+      meta,
+      tw.workspace,
+      PROJECT_ROOT,
+    );
+
+    expect(prompt.userMessage).toContain("PAGE_CRO_LEARNING");
+    expect(prompt.userMessage).not.toContain("COPYWRITING_LEARNING");
+    expect(prompt.learningsIncluded).toBe(1);
+  });
+
+  it("does not crash when no learnings file exists", async () => {
+    const meta = await loadSkillMeta("page-cro", PROJECT_ROOT);
+    const task = createPromptTestTask();
+
+    const prompt = await buildAgentPrompt(
+      task,
+      meta,
+      tw.workspace,
+      PROJECT_ROOT,
+    );
+
+    // Should not crash, no learnings tags
+    expect(prompt.userMessage).not.toContain("<past-learnings>");
+    expect(prompt.learningsIncluded).toBe(0);
+  });
+
+  it("places learnings between context and requirements", async () => {
+    await tw.workspace.writeFile(
+      "context/product-marketing-context.md",
+      "CONTEXT_MARKER",
+    );
+    await tw.workspace.appendLearning({
+      timestamp: "2026-02-19T10:00:00.000Z",
+      agent: "page-cro",
+      goalId: null,
+      outcome: "success",
+      learning: "LEARNING_MARKER",
+      actionTaken: "ACTION_MARKER",
+    });
+
+    const meta = await loadSkillMeta("page-cro", PROJECT_ROOT);
+    const task = createPromptTestTask({
+      requirements: "REQUIREMENTS_MARKER",
+    });
+
+    const prompt = await buildAgentPrompt(
+      task,
+      meta,
+      tw.workspace,
+      PROJECT_ROOT,
+    );
+
+    const contextIdx = prompt.userMessage.indexOf("CONTEXT_MARKER");
+    const learningIdx = prompt.userMessage.indexOf("LEARNING_MARKER");
+    const reqIdx = prompt.userMessage.indexOf("REQUIREMENTS_MARKER");
+
+    expect(contextIdx).toBeGreaterThanOrEqual(0);
+    expect(learningIdx).toBeGreaterThan(contextIdx);
+    expect(reqIdx).toBeGreaterThan(learningIdx);
+  });
+
+  it("limits learnings to 10 most recent", async () => {
+    // Write 12 learnings for page-cro
+    for (let i = 0; i < 12; i++) {
+      const hour = i.toString().padStart(2, "0");
+      await tw.workspace.appendLearning({
+        timestamp: `2026-02-19T${hour}:00:00.000Z`,
+        agent: "page-cro",
+        goalId: null,
+        outcome: "success",
+        learning: `Learning number ${i}`,
+        actionTaken: `Action number ${i}`,
+      });
+    }
+
+    const meta = await loadSkillMeta("page-cro", PROJECT_ROOT);
+    const task = createPromptTestTask();
+
+    const prompt = await buildAgentPrompt(
+      task,
+      meta,
+      tw.workspace,
+      PROJECT_ROOT,
+    );
+
+    expect(prompt.learningsIncluded).toBeLessThanOrEqual(10);
+  });
 });

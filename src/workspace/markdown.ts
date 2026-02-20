@@ -293,8 +293,50 @@ export function serializeLearningEntry(entry: LearningEntry): string {
   lines.push(`- **Outcome:** ${entry.outcome}`);
   lines.push(`- **Learning:** ${entry.learning}`);
   lines.push(`- **Action:** ${entry.actionTaken}`);
+  if (entry.tags && entry.tags.length > 0) {
+    lines.push(`- **Tags:** ${entry.tags.join(", ")}`);
+  }
+  if (entry.confidence !== undefined) {
+    lines.push(`- **Confidence:** ${entry.confidence}`);
+  }
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * Parse the raw learnings markdown back into structured LearningEntry[].
+ * Splits on ### timestamp headers and extracts fields from bullet points.
+ */
+export function parseLearnings(markdown: string): LearningEntry[] {
+  if (!markdown.trim()) return [];
+
+  const entries: LearningEntry[] = [];
+  const blocks = markdown.split(/(?=^### )/m);
+
+  for (const block of blocks) {
+    const timestampMatch = block.match(/^### (.+)/);
+    if (!timestampMatch) continue;
+
+    const timestamp = timestampMatch[1]!.trim();
+    const agent = extractLearningField(block, "Agent") as LearningEntry["agent"];
+    const goalId = extractLearningField(block, "Goal") || null;
+    const outcome = (extractLearningField(block, "Outcome") || "partial") as LearningEntry["outcome"];
+    const learning = extractLearningField(block, "Learning") || "";
+    const actionTaken = extractLearningField(block, "Action") || "";
+    const tagsStr = extractLearningField(block, "Tags");
+    const tags = tagsStr ? tagsStr.split(",").map(t => t.trim()) : undefined;
+    const confStr = extractLearningField(block, "Confidence");
+    const confidence = confStr ? parseFloat(confStr) : undefined;
+
+    entries.push({ timestamp, agent, goalId, outcome, learning, actionTaken, tags, confidence });
+  }
+
+  return entries;
+}
+
+function extractLearningField(block: string, fieldName: string): string {
+  const match = block.match(new RegExp(`\\*\\*${fieldName}:\\*\\*\\s*(.+)`));
+  return match ? match[1]!.trim() : "";
 }
 
 // ── Goal Serialization ──────────────────────────────────────────────────────
