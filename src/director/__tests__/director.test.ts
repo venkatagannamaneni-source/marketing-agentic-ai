@@ -465,4 +465,109 @@ describe("MarketingDirector", () => {
       expect(prompt).toContain("Budget");
     });
   });
+
+  describe("createGoal with learnings", () => {
+    it("attaches relevant learnings to goal metadata", async () => {
+      // Write learnings for skills in the optimization routing
+      await tw.workspace.appendLearning({
+        timestamp: "2026-02-19T10:00:00.000Z",
+        agent: "page-cro",
+        goalId: null,
+        outcome: "success",
+        learning: "CTA above fold boosts conversions",
+        actionTaken: "Place CTA above fold",
+      });
+
+      const goal = await director.createGoal(
+        "Increase signups by 30%",
+        "optimization",
+      );
+
+      const learnings = goal.metadata.relevantLearnings as Array<{
+        agent: string;
+        learning: string;
+      }>;
+      expect(learnings).toBeDefined();
+      expect(learnings.length).toBeGreaterThan(0);
+      expect(learnings[0]!.agent).toBe("page-cro");
+      expect(learnings[0]!.learning).toBe("CTA above fold boosts conversions");
+    });
+
+    it("includes director learnings in goal metadata", async () => {
+      await tw.workspace.appendLearning({
+        timestamp: "2026-02-19T10:00:00.000Z",
+        agent: "director",
+        goalId: null,
+        outcome: "partial",
+        learning: "Director-level insight",
+        actionTaken: "Adjusted strategy",
+      });
+
+      const goal = await director.createGoal(
+        "Launch new feature",
+        "strategic",
+      );
+
+      const learnings = goal.metadata.relevantLearnings as Array<{
+        agent: string;
+      }>;
+      expect(learnings).toBeDefined();
+      expect(learnings.some(l => l.agent === "director")).toBe(true);
+    });
+
+    it("works normally when no learnings exist", async () => {
+      const goal = await director.createGoal(
+        "Simple goal",
+        "content",
+      );
+
+      expect(goal.metadata.relevantLearnings).toBeUndefined();
+      expect(goal.id).toStartWith("goal-");
+      expect(goal.description).toBe("Simple goal");
+    });
+
+    it("limits learnings to 5 most recent", async () => {
+      // Write 8 learnings for page-cro
+      for (let i = 0; i < 8; i++) {
+        const hour = i.toString().padStart(2, "0");
+        await tw.workspace.appendLearning({
+          timestamp: `2026-02-19T${hour}:00:00.000Z`,
+          agent: "page-cro",
+          goalId: null,
+          outcome: "success",
+          learning: `Learning ${i}`,
+          actionTaken: `Action ${i}`,
+        });
+      }
+
+      const goal = await director.createGoal(
+        "Optimize conversions",
+        "optimization",
+      );
+
+      const learnings = goal.metadata.relevantLearnings as Array<unknown>;
+      expect(learnings).toBeDefined();
+      expect(learnings.length).toBeLessThanOrEqual(5);
+    });
+
+    it("excludes learnings from unrelated skills", async () => {
+      // cold-email is not in the optimization routing
+      await tw.workspace.appendLearning({
+        timestamp: "2026-02-19T10:00:00.000Z",
+        agent: "cold-email",
+        goalId: null,
+        outcome: "success",
+        learning: "Irrelevant learning",
+        actionTaken: "Irrelevant action",
+      });
+
+      const goal = await director.createGoal(
+        "Optimize signup page",
+        "optimization",
+      );
+
+      // Should have no learnings (cold-email is not in optimization routing)
+      expect(goal.metadata.relevantLearnings).toBeUndefined();
+    });
+  });
 });

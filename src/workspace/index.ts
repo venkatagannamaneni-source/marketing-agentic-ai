@@ -20,6 +20,7 @@ export {
   serializeReview,
   deserializeReview,
   serializeLearningEntry,
+  parseLearnings,
   serializeGoal,
   deserializeGoal,
   serializeGoalPlan,

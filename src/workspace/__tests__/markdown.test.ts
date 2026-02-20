@@ -8,6 +8,7 @@ import {
   serializeReview,
   deserializeReview,
   serializeLearningEntry,
+  parseLearnings,
 } from "../markdown.ts";
 import { WorkspaceError } from "../errors.ts";
 
@@ -632,5 +633,251 @@ describe("deserializeReview validation edge cases", () => {
     const md = serializeReview(review);
     const restored = deserializeReview(md);
     expect(restored.reviewer).toBe("copy-editing");
+  });
+});
+
+// ── serializeLearningEntry with tags/confidence ─────────────────────────────
+
+describe("serializeLearningEntry with tags and confidence", () => {
+  it("includes tags when present", () => {
+    const entry = {
+      timestamp: "2026-02-19T12:00:00.000Z",
+      agent: "copywriting" as const,
+      goalId: null,
+      outcome: "success" as const,
+      learning: "Tags test",
+      actionTaken: "Check tags",
+      tags: ["cro", "headlines"] as const,
+    };
+
+    const md = serializeLearningEntry(entry);
+    expect(md).toContain("**Tags:** cro, headlines");
+  });
+
+  it("includes confidence when present", () => {
+    const entry = {
+      timestamp: "2026-02-19T12:00:00.000Z",
+      agent: "page-cro" as const,
+      goalId: null,
+      outcome: "success" as const,
+      learning: "Confidence test",
+      actionTaken: "Check confidence",
+      confidence: 0.85,
+    };
+
+    const md = serializeLearningEntry(entry);
+    expect(md).toContain("**Confidence:** 0.85");
+  });
+
+  it("omits tags when empty array", () => {
+    const entry = {
+      timestamp: "2026-02-19T12:00:00.000Z",
+      agent: "copywriting" as const,
+      goalId: null,
+      outcome: "success" as const,
+      learning: "No tags",
+      actionTaken: "Check no tags",
+      tags: [] as const,
+    };
+
+    const md = serializeLearningEntry(entry);
+    expect(md).not.toContain("**Tags:**");
+  });
+
+  it("omits tags and confidence when undefined", () => {
+    const entry = {
+      timestamp: "2026-02-19T12:00:00.000Z",
+      agent: "copywriting" as const,
+      goalId: null,
+      outcome: "success" as const,
+      learning: "Basic entry",
+      actionTaken: "No extras",
+    };
+
+    const md = serializeLearningEntry(entry);
+    expect(md).not.toContain("**Tags:**");
+    expect(md).not.toContain("**Confidence:**");
+  });
+});
+
+// ── parseLearnings ──────────────────────────────────────────────────────────
+
+describe("parseLearnings", () => {
+  it("returns empty array for empty input", () => {
+    expect(parseLearnings("")).toEqual([]);
+    expect(parseLearnings("   ")).toEqual([]);
+  });
+
+  it("parses a single learning entry", () => {
+    const md = `### 2026-02-19T12:00:00.000Z
+
+- **Agent:** copywriting
+- **Goal:** goal-123
+- **Outcome:** success
+- **Learning:** Short headlines convert better
+- **Action:** Default to 6-word headlines
+`;
+
+    const entries = parseLearnings(md);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.timestamp).toBe("2026-02-19T12:00:00.000Z");
+    expect(entries[0]!.agent).toBe("copywriting");
+    expect(entries[0]!.goalId).toBe("goal-123");
+    expect(entries[0]!.outcome).toBe("success");
+    expect(entries[0]!.learning).toBe("Short headlines convert better");
+    expect(entries[0]!.actionTaken).toBe("Default to 6-word headlines");
+  });
+
+  it("parses multiple learning entries", () => {
+    const md = `### 2026-02-19T12:00:00.000Z
+
+- **Agent:** copywriting
+- **Outcome:** success
+- **Learning:** First learning
+- **Action:** First action
+
+### 2026-02-19T13:00:00.000Z
+
+- **Agent:** page-cro
+- **Outcome:** failure
+- **Learning:** Second learning
+- **Action:** Second action
+`;
+
+    const entries = parseLearnings(md);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]!.agent).toBe("copywriting");
+    expect(entries[1]!.agent).toBe("page-cro");
+    expect(entries[1]!.outcome).toBe("failure");
+  });
+
+  it("parses entries with tags and confidence", () => {
+    const md = `### 2026-02-19T12:00:00.000Z
+
+- **Agent:** page-cro
+- **Outcome:** success
+- **Learning:** CTA above fold works
+- **Action:** Always place CTA above fold
+- **Tags:** cro, conversion, cta
+- **Confidence:** 0.92
+`;
+
+    const entries = parseLearnings(md);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.tags).toEqual(["cro", "conversion", "cta"]);
+    expect(entries[0]!.confidence).toBe(0.92);
+  });
+
+  it("returns undefined for tags/confidence when not present", () => {
+    const md = `### 2026-02-19T12:00:00.000Z
+
+- **Agent:** copywriting
+- **Outcome:** success
+- **Learning:** Basic entry
+- **Action:** Basic action
+`;
+
+    const entries = parseLearnings(md);
+    expect(entries[0]!.tags).toBeUndefined();
+    expect(entries[0]!.confidence).toBeUndefined();
+  });
+
+  it("handles null goalId when Goal field is missing", () => {
+    const md = `### 2026-02-19T12:00:00.000Z
+
+- **Agent:** director
+- **Outcome:** partial
+- **Learning:** No goal
+- **Action:** Some action
+`;
+
+    const entries = parseLearnings(md);
+    expect(entries[0]!.goalId).toBeNull();
+  });
+
+  it("round-trips through serialize then parse", () => {
+    const entry = {
+      timestamp: "2026-02-19T14:00:00.000Z",
+      agent: "page-cro" as const,
+      goalId: "goal-456",
+      outcome: "success" as const,
+      learning: "Forms with 3 fields convert 2x better",
+      actionTaken: "Limit forms to 3 fields",
+      tags: ["forms", "cro"] as const,
+      confidence: 0.88,
+    };
+
+    const md = serializeLearningEntry(entry);
+    const parsed = parseLearnings(md);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]!.timestamp).toBe(entry.timestamp);
+    expect(parsed[0]!.agent).toBe(entry.agent);
+    expect(parsed[0]!.goalId).toBe(entry.goalId);
+    expect(parsed[0]!.outcome).toBe(entry.outcome);
+    expect(parsed[0]!.learning).toBe(entry.learning);
+    expect(parsed[0]!.actionTaken).toBe(entry.actionTaken);
+    expect(parsed[0]!.tags).toEqual(["forms", "cro"]);
+    expect(parsed[0]!.confidence).toBe(0.88);
+  });
+
+  it("skips entries with invalid agent names", () => {
+    const md = `### 2026-02-19T12:00:00.000Z
+
+- **Agent:** invalid-agent-xyz
+- **Outcome:** success
+- **Learning:** Should be skipped
+- **Action:** Skipped
+
+### 2026-02-19T13:00:00.000Z
+
+- **Agent:** copywriting
+- **Outcome:** success
+- **Learning:** Valid entry
+- **Action:** Valid action
+`;
+
+    const entries = parseLearnings(md);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.agent).toBe("copywriting");
+  });
+
+  it("skips entries with invalid outcome values", () => {
+    const md = `### 2026-02-19T12:00:00.000Z
+
+- **Agent:** copywriting
+- **Outcome:** maybe-success
+- **Learning:** Should be skipped
+- **Action:** Skipped
+`;
+
+    const entries = parseLearnings(md);
+    expect(entries).toHaveLength(0);
+  });
+
+  it("treats non-numeric confidence as undefined", () => {
+    const md = `### 2026-02-19T12:00:00.000Z
+
+- **Agent:** copywriting
+- **Outcome:** success
+- **Learning:** Test
+- **Action:** Test
+- **Confidence:** very-high
+`;
+
+    const entries = parseLearnings(md);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.confidence).toBeUndefined();
+  });
+
+  it("handles entries with missing agent field", () => {
+    const md = `### 2026-02-19T12:00:00.000Z
+
+- **Outcome:** success
+- **Learning:** No agent
+- **Action:** Some action
+`;
+
+    const entries = parseLearnings(md);
+    expect(entries).toHaveLength(0);
   });
 });
