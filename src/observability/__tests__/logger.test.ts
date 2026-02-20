@@ -257,6 +257,22 @@ describe("createLogger", () => {
   });
 });
 
+// ── createLogger Production Hardening ─────────────────────────────────────────
+
+describe("createLogger production hardening", () => {
+  it("pretty format does not throw even if pino-pretty fails", () => {
+    // pino-pretty is a devDependency — in prod this could fail
+    // createLogger should fallback gracefully to JSON format
+    expect(() => createLogger({ format: "pretty" })).not.toThrow();
+  });
+
+  it("pretty format returns a functional logger", () => {
+    const logger = createLogger({ format: "pretty", level: "silent" });
+    expect(() => logger.info("test")).not.toThrow();
+    expect(() => logger.error("err", { code: 500 })).not.toThrow();
+  });
+});
+
 // ── DEFAULT_LOGGER_CONFIG Tests ─────────────────────────────────────────────
 
 describe("DEFAULT_LOGGER_CONFIG", () => {

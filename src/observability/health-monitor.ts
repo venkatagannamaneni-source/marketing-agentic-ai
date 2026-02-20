@@ -200,13 +200,22 @@ export class HealthMonitor {
         }),
       );
 
-      for (const result of results) {
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i]!;
         if (result.status === "fulfilled") {
           const [name, health] = result.value;
           components[name] = health;
+        } else {
+          // Defensive: should not happen since .then() catches all errors,
+          // but never silently lose a component in production
+          const [name] = entries[i]!;
+          components[name] = createOfflineComponent(
+            name,
+            result.reason instanceof Error
+              ? result.reason.message
+              : String(result.reason),
+          );
         }
-        // "rejected" should not happen since we catch errors in the .then(),
-        // but if it does, we simply skip the component
       }
     }
 

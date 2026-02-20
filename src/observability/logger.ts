@@ -127,7 +127,12 @@ export function createLogger(config?: Partial<LoggerConfig>): Logger {
   let instance: pino.Logger;
 
   if (merged.format === "pretty") {
-    instance = pino(pinoOptions, pino.transport({ target: "pino-pretty" }));
+    try {
+      instance = pino(pinoOptions, pino.transport({ target: "pino-pretty" }));
+    } catch {
+      // pino-pretty is a devDependency — fallback to JSON in production
+      instance = pino(pinoOptions);
+    }
   } else {
     instance = pino(pinoOptions);
   }
