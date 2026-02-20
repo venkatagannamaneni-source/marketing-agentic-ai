@@ -27,6 +27,7 @@ export type {
   EventType,
   SystemEvent,
   ScheduleEntry,
+  ScheduleState,
   SystemState,
   DegradationLevel,
   ComponentStatus,
@@ -261,3 +262,54 @@ export type {
   WebhookServer,
   WebhookStats,
 } from "./events/index.ts";
+
+// ── Scheduler ───────────────────────────────────────────────────────────────
+export {
+  Scheduler,
+  DEFAULT_SCHEDULER_CONFIG,
+  type SchedulerConfig,
+  type SchedulerDeps,
+  type TickResult,
+  type SkipEntry,
+  parseCron,
+  cronMatches,
+  previousCronMatch,
+  CronParseError,
+  type CronFields,
+  DEFAULT_SCHEDULES,
+} from "./scheduler/index.ts";
+
+// ── BullMQ Adapters ─────────────────────────────────────────────────────────
+export {
+  BullMQQueueAdapter,
+  BullMQWorkerAdapter,
+  type BullMQConnectionOptions,
+} from "./queue/bullmq-adapter.ts";
+
+// ── Config ──────────────────────────────────────────────────────────────────
+export {
+  loadConfig,
+  ConfigError,
+  type RuntimeConfig,
+} from "./config.ts";
+
+// ── Bootstrap ───────────────────────────────────────────────────────────────
+export {
+  bootstrap,
+  type Application,
+} from "./bootstrap.ts";
+
+// ── Runtime ─────────────────────────────────────────────────────────────────
+export {
+  runGoal,
+  inferCategory,
+  type GoalRunOptions,
+  type GoalResult,
+  type GoalResultStatus,
+} from "./runtime/run-goal.ts";
+
+// ── CLI ─────────────────────────────────────────────────────────────────────
+export {
+  parseArgs,
+  type ParsedArgs,
+} from "./cli.ts";
