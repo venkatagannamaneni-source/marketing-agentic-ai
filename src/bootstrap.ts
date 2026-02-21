@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { RuntimeConfig } from "./config.ts";
 import { createLogger } from "./observability/logger.ts";
 import type { Logger } from "./observability/logger.ts";
@@ -14,6 +15,7 @@ import { MarketingDirector } from "./director/director.ts";
 import { SequentialPipelineEngine } from "./pipeline/pipeline-engine.ts";
 import { PipelineFactory } from "./director/pipeline-factory.ts";
 import { PIPELINE_TEMPLATES } from "./agents/registry.ts";
+import { SkillRegistry } from "./agents/skill-registry.ts";
 import { TaskQueueManager } from "./queue/task-queue.ts";
 import { createRedisConnection } from "./queue/redis-connection.ts";
 import type { RedisConnectionManager } from "./queue/redis-connection.ts";
@@ -33,6 +35,7 @@ import { DEFAULT_SCHEDULES } from "./scheduler/default-schedules.ts";
 
 export interface Application {
   readonly config: RuntimeConfig;
+  readonly registry: SkillRegistry;
   readonly workspace: FileSystemWorkspaceManager;
   readonly client: AnthropicClaudeClient;
   readonly director: MarketingDirector;
@@ -72,7 +75,16 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     maxParallelAgents: config.maxParallelAgents,
   });
 
-  // 2. Workspace
+  // 2. Skill Registry — load from .agents/skills.yaml
+  const registryPath = resolve(config.projectRoot, ".agents/skills.yaml");
+  const registry = await SkillRegistry.fromYaml(registryPath);
+  logger.info("Skill registry loaded", {
+    skills: registry.skillNames.length,
+    squads: registry.squadNames.length,
+    foundation: registry.foundationSkill,
+  });
+
+  // 3. Workspace
   const workspace = new FileSystemWorkspaceManager({
     rootDir: config.workspace.rootDir,
   });
@@ -208,6 +220,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
   // 16. Build Application object
   const app: Application = {
     config,
+    registry,
     workspace,
     client,
     director,

@@ -1,18 +1,22 @@
 // ── Squad Names ──────────────────────────────────────────────────────────────
+// Default squads — matches .agents/skills.yaml.
+// For runtime extensibility, use SkillRegistry.fromYaml() instead.
 
-export const SQUAD_NAMES = [
+export const SQUAD_NAMES: readonly string[] = [
   "strategy",
   "creative",
   "convert",
   "activate",
   "measure",
-] as const;
+];
 
-export type SquadName = (typeof SQUAD_NAMES)[number];
+export type SquadName = string;
 
 // ── Skill Names ──────────────────────────────────────────────────────────────
+// Default skills — matches .agents/skills.yaml.
+// For runtime extensibility, use SkillRegistry.fromYaml() instead.
 
-export const SKILL_NAMES = [
+export const SKILL_NAMES: readonly string[] = [
   // Foundation
   "product-marketing-context",
   // Strategy Squad
@@ -45,15 +49,16 @@ export const SKILL_NAMES = [
   "analytics-tracking",
   "ab-test-setup",
   "seo-audit",
-] as const;
+];
 
-export type SkillName = (typeof SKILL_NAMES)[number];
+export type SkillName = string;
 
-export const FOUNDATION_SKILL: SkillName = "product-marketing-context";
+export const FOUNDATION_SKILL: string = "product-marketing-context";
 
 // ── Skill → Squad Mapping ────────────────────────────────────────────────────
+// Default mapping — matches .agents/skills.yaml.
 
-export const SKILL_SQUAD_MAP: Record<SkillName, SquadName | null> = {
+export const SKILL_SQUAD_MAP: Record<string, string | null> = {
   "product-marketing-context": null,
   // Strategy
   "content-strategy": "strategy",

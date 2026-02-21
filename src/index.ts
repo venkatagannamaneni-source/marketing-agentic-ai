@@ -120,6 +120,10 @@ export {
   PIPELINE_TEMPLATES,
   loadSkillMeta,
   loadAllSkills,
+  // Skill Registry
+  SkillRegistry,
+  SkillRegistryError,
+  type SkillRegistryData,
   // Claude Client
   type ClaudeClient,
   type ClaudeMessageParams,

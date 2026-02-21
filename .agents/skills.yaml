@@ -1,0 +1,185 @@
+# Skill Registry Configuration
+#
+# This file is the canonical source of truth for all skills, squads,
+# and their dependency relationships.
+#
+# To add a new skill:
+#   1. Add an entry under `skills:` below
+#   2. Create .agents/skills/<skill-name>/SKILL.md
+#   3. Restart the system (or run `bun run validate-skills`)
+#
+# No TypeScript changes needed. No recompile.
+
+squads:
+  strategy:
+    description: Plans what to do and why
+  creative:
+    description: Produces content and copy
+  convert:
+    description: Optimizes conversion touchpoints
+  activate:
+    description: Turns signups into retained paying users
+  measure:
+    description: Closes the feedback loop
+
+foundation_skill: product-marketing-context
+
+skills:
+  # Foundation — consumed by all other agents
+  product-marketing-context:
+    squad: null
+    description: Shared product/audience/positioning context
+    downstream: all
+
+  # ── Strategy Squad ───────────────────────────────────────────────
+  content-strategy:
+    squad: strategy
+    description: Plans content pillars and topics
+    downstream:
+      - copywriting
+      - programmatic-seo
+      - social-content
+
+  pricing-strategy:
+    squad: strategy
+    description: Designs pricing and packaging
+    downstream:
+      - copywriting
+      - page-cro
+
+  launch-strategy:
+    squad: strategy
+    description: Plans phased product launches
+    downstream:
+      - email-sequence
+      - social-content
+      - paid-ads
+      - page-cro
+
+  marketing-ideas:
+    squad: strategy
+    description: Curates proven marketing tactics
+    downstream: []
+
+  marketing-psychology:
+    squad: strategy
+    description: Applies behavioral science to marketing
+    downstream: []
+
+  competitor-alternatives:
+    squad: strategy
+    description: Researches competitors, builds comparison content
+    downstream:
+      - copywriting
+      - programmatic-seo
+
+  # ── Creative Squad ───────────────────────────────────────────────
+  copywriting:
+    squad: creative
+    description: Writes marketing page copy
+    downstream:
+      - page-cro
+      - copy-editing
+
+  copy-editing:
+    squad: creative
+    description: Edits via 7 systematic sweeps
+    downstream:
+      - page-cro
+
+  social-content:
+    squad: creative
+    description: Creates platform-specific social posts
+    downstream: []
+
+  cold-email:
+    squad: creative
+    description: Writes outreach sequences
+    downstream: []
+
+  paid-ads:
+    squad: creative
+    description: Designs ad campaigns and copy
+    downstream: []
+
+  programmatic-seo:
+    squad: creative
+    description: Builds SEO page templates at scale
+    downstream: []
+
+  schema-markup:
+    squad: creative
+    description: Generates JSON-LD structured data
+    downstream: []
+
+  # ── Convert Squad ────────────────────────────────────────────────
+  page-cro:
+    squad: convert
+    description: Audits pages for conversion issues
+    downstream:
+      - copywriting
+      - form-cro
+      - popup-cro
+
+  form-cro:
+    squad: convert
+    description: Optimizes lead capture and contact forms
+    downstream: []
+
+  signup-flow-cro:
+    squad: convert
+    description: Optimizes registration flows
+    downstream:
+      - onboarding-cro
+
+  popup-cro:
+    squad: convert
+    description: Creates and optimizes popups/modals
+    downstream: []
+
+  free-tool-strategy:
+    squad: convert
+    description: Plans free tools for lead generation
+    downstream: []
+
+  # ── Activate Squad ───────────────────────────────────────────────
+  onboarding-cro:
+    squad: activate
+    description: Optimizes post-signup activation
+    downstream:
+      - email-sequence
+
+  email-sequence:
+    squad: activate
+    description: Creates lifecycle email sequences
+    downstream:
+      - analytics-tracking
+
+  paywall-upgrade-cro:
+    squad: activate
+    description: Optimizes free-to-paid conversion
+    downstream: []
+
+  referral-program:
+    squad: activate
+    description: Designs referral/affiliate programs
+    downstream:
+      - analytics-tracking
+
+  # ── Measure Squad ────────────────────────────────────────────────
+  analytics-tracking:
+    squad: measure
+    description: Sets up GA4/GTM tracking
+    downstream: []
+
+  ab-test-setup:
+    squad: measure
+    description: Designs statistically rigorous experiments
+    downstream: []
+
+  seo-audit:
+    squad: measure
+    description: Audits technical SEO, content, E-E-A-T
+    downstream:
+      - content-strategy
+      - programmatic-seo

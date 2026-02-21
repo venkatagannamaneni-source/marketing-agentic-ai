@@ -8,6 +8,13 @@ export {
 
 export { loadSkillMeta, loadAllSkills } from "./skill-loader.ts";
 
+// ── Skill Registry ─────────────────────────────────────────────────────
+export {
+  SkillRegistry,
+  SkillRegistryError,
+  type SkillRegistryData,
+} from "./skill-registry.ts";
+
 // ── Claude Client ───────────────────────────────────────────────────────
 export type {
   ClaudeClient,
