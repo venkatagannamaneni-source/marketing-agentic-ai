@@ -333,6 +333,134 @@ function createDirectorMockClient(
   };
 }
 
+// ── EventBus ─────────────────────────────────────────────────────────────────
+import { EventBus } from "../../events/event-bus.ts";
+import type { EventMapping } from "../../events/event-bus.ts";
+import { DEFAULT_EVENT_MAPPINGS } from "../../events/default-mappings.ts";
+
+// ── Scheduler ────────────────────────────────────────────────────────────────
+import { Scheduler } from "../../scheduler/scheduler.ts";
+
+// ── CostTracker ──────────────────────────────────────────────────────────────
+import { CostTracker } from "../../observability/cost-tracker.ts";
+
+// ── Logger ───────────────────────────────────────────────────────────────────
+import { BufferLogger } from "../../observability/logger.ts";
+
+// ── Full E2E Context (extends E2EContext with EventBus, Scheduler, CostTracker)
+
+export interface E2EFullContext extends E2EContext {
+  eventBus: EventBus;
+  scheduler: Scheduler;
+  costTracker: CostTracker;
+  logger: BufferLogger;
+  clock: { now: Date };
+}
+
+export interface FullBootstrapOptions extends BootstrapOptions {
+  eventMappings?: readonly EventMapping[];
+  budgetTotal?: number;
+  clockDate?: Date;
+}
+
+/**
+ * Extended bootstrap that wires EventBus, Scheduler, and CostTracker on top
+ * of the core E2EContext. Uses real CostTracker as budgetProvider for both
+ * QueueManager and Scheduler.
+ */
+export async function bootstrapE2EFull(
+  options?: FullBootstrapOptions,
+): Promise<E2EFullContext> {
+  const logger = new BufferLogger();
+
+  // CostTracker — drives budget state for queue and scheduler
+  const costTracker = new CostTracker({
+    budget: {
+      totalMonthly: options?.budgetTotal ?? 1000,
+      warningPercent: 80,
+      throttlePercent: 90,
+      criticalPercent: 95,
+    },
+  });
+
+  // Build base context with costTracker as budget provider
+  const base = await bootstrapE2E(options);
+
+  // Override budget provider to use real CostTracker
+  const budgetProvider = () => costTracker.toBudgetState();
+  (base as { getBudget: () => BudgetState }).getBudget = budgetProvider;
+  (base as { setBudget: (s: BudgetState) => void }).setBudget = () => {
+    throw new Error("Use costTracker.record() to change budget in full context");
+  };
+
+  // Rebuild QueueManager with CostTracker-backed budget
+  const queueManager = new TaskQueueManager({
+    workspace: base.workspace,
+    director: base.director,
+    executor: new AgentExecutor(
+      base.pipelineClient,
+      base.workspace,
+      {
+        projectRoot: PROJECT_ROOT,
+        defaultModel: "sonnet",
+        defaultTimeoutMs: 30_000,
+        defaultMaxTokens: 8192,
+        maxRetries: 0,
+        maxContextTokens: 150_000,
+      },
+      logger,
+    ),
+    budgetProvider,
+    queue: base.mockQueue,
+    worker: base.mockWorker,
+    redis: createRedisConnectionFromClient(base.mockRedis),
+    config: {
+      healthCheckIntervalMs: 60_000_000,
+      fallbackDir: join(base.tempDir, "queue-fallback"),
+    },
+    logger,
+  });
+
+  // Clock for Scheduler (mutable)
+  const clock = { now: options?.clockDate ?? new Date(2026, 1, 16, 6, 0) };
+
+  // EventBus — wired to real Director + QueueManager
+  const eventBus = new EventBus(
+    [...(options?.eventMappings ?? DEFAULT_EVENT_MAPPINGS)],
+    { director: base.director, queueManager, logger },
+  );
+
+  // Scheduler — wired to real Director + Workspace + CostTracker budget
+  const scheduler = new Scheduler({
+    director: base.director,
+    workspace: base.workspace,
+    logger,
+    budgetProvider,
+    clock: () => clock.now,
+    config: {
+      tickIntervalMs: 60_000,
+      catchUpOnStart: false,
+    },
+  });
+
+  const origCleanup = base.cleanup;
+  return {
+    ...base,
+    queueManager,
+    eventBus,
+    scheduler,
+    costTracker,
+    logger,
+    clock,
+    getBudget: budgetProvider,
+    cleanup: async () => {
+      await scheduler.stop().catch(() => {});
+      await queueManager.stop().catch(() => {});
+      await origCleanup();
+    },
+  };
+}
+
 // ── Mock Product Context ──────────────────────────────────────────────────────
 
 export const MOCK_PRODUCT_CONTEXT = `# Product Marketing Context
