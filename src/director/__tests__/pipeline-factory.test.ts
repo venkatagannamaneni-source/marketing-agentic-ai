@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { PipelineFactory } from "../pipeline-factory.ts";
 import { PIPELINE_TEMPLATES } from "../../agents/registry.ts";
+import { SkillRegistry } from "../../agents/skill-registry.ts";
+import type { SkillRegistryData } from "../../agents/skill-registry.ts";
 import { createTestGoal } from "./helpers.ts";
 import { GoalDecomposer } from "../goal-decomposer.ts";
 import { routeGoal } from "../squad-router.ts";
@@ -432,5 +434,121 @@ describe("PipelineFactory", () => {
       );
       expect(result.tasks[0]!.goalId).toBe("my-goal-id");
     });
+  });
+});
+
+// ── PipelineFactory with SkillRegistry ────────────────────────────────────────
+
+describe("PipelineFactory with SkillRegistry", () => {
+  // Registry where "copywriting" is in squad "custom-creative" instead of "creative"
+  const registryData: SkillRegistryData = {
+    squads: {
+      "custom-creative": { description: "Custom creative squad" },
+      strategy: { description: "Strategy squad" },
+      measure: { description: "Measure squad" },
+    },
+    foundation_skill: "product-marketing-context",
+    skills: {
+      "product-marketing-context": {
+        squad: null,
+        description: "Foundation",
+        downstream: "all",
+      },
+      "copywriting": {
+        squad: "custom-creative",
+        description: "Writing",
+        downstream: [],
+      },
+      "content-strategy": {
+        squad: "strategy",
+        description: "Strategy",
+        downstream: ["copywriting"],
+      },
+      "analytics-tracking": {
+        squad: "measure",
+        description: "Tracking",
+        downstream: [],
+      },
+    },
+  };
+
+  const registry = SkillRegistry.fromData(registryData);
+  const factoryWithRegistry = new PipelineFactory(PIPELINE_TEMPLATES, registry);
+
+  it("uses registry skillSquadMap for output paths", () => {
+    const template = factoryWithRegistry.findTemplate("Content Production")!;
+    const def = factoryWithRegistry.templateToDefinition(template);
+    const run = factoryWithRegistry.createRun(def, "goal-1");
+
+    // content-strategy step → should use "strategy" squad from registry
+    const step = def.steps[0]!;
+    const tasks = factoryWithRegistry.createTasksForStep(
+      step,
+      0,
+      def.steps.length,
+      run,
+      "Test",
+      "P2",
+      [],
+    );
+    expect(tasks[0]!.output.path).toContain("outputs/strategy/content-strategy/");
+  });
+
+  it("resolves custom squad mapping from registry", () => {
+    const template = factoryWithRegistry.findTemplate("Content Production")!;
+    const def = factoryWithRegistry.templateToDefinition(template);
+    const run = factoryWithRegistry.createRun(def, "goal-1");
+
+    // copywriting step → should use "custom-creative" squad from registry
+    const copywritingStep = def.steps[1]!; // second step in Content Production
+    const tasks = factoryWithRegistry.createTasksForStep(
+      copywritingStep,
+      1,
+      def.steps.length,
+      run,
+      "Test",
+      "P2",
+      [],
+    );
+    expect(tasks[0]!.output.path).toContain("outputs/custom-creative/copywriting/");
+  });
+
+  it("falls back to foundation path for skills with null squad", () => {
+    const template = factoryWithRegistry.findTemplate("Content Production")!;
+    const def = factoryWithRegistry.templateToDefinition(template);
+    const run = factoryWithRegistry.createRun(def, "goal-1");
+
+    // Manually create a step for the foundation skill
+    const foundationStep = { type: "sequential" as const, skill: "product-marketing-context" };
+    const tasks = factoryWithRegistry.createTasksForStep(
+      foundationStep,
+      0,
+      1,
+      run,
+      "Test",
+      "P2",
+      [],
+    );
+    expect(tasks[0]!.output.path).toContain("outputs/foundation/product-marketing-context/");
+  });
+
+  it("uses hardcoded defaults when no registry is provided", () => {
+    const factoryNoRegistry = new PipelineFactory(PIPELINE_TEMPLATES);
+    const template = factoryNoRegistry.findTemplate("Content Production")!;
+    const def = factoryNoRegistry.templateToDefinition(template);
+    const run = factoryNoRegistry.createRun(def, "goal-1");
+
+    // copywriting should use "creative" (hardcoded default), not "custom-creative"
+    const copywritingStep = def.steps[1]!;
+    const tasks = factoryNoRegistry.createTasksForStep(
+      copywritingStep,
+      1,
+      def.steps.length,
+      run,
+      "Test",
+      "P2",
+      [],
+    );
+    expect(tasks[0]!.output.path).toContain("outputs/creative/copywriting/");
   });
 });

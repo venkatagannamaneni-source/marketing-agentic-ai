@@ -29,6 +29,7 @@ describe("Application interface contract", () => {
 
     const mockApp: Application = {
       config,
+      registry: {} as any,
       workspace: {} as any,
       client: {} as any,
       director: {} as any,
@@ -54,6 +55,7 @@ describe("Application interface contract", () => {
 
     const mockApp: Application = {
       config,
+      registry: {} as any,
       workspace: {} as any,
       client: {} as any,
       director: {} as any,
@@ -95,6 +97,7 @@ describe("Application interface contract", () => {
 
     const mockApp: Application = {
       config,
+      registry: {} as any,
       workspace: {} as any,
       client: {} as any,
       director: {} as any,
@@ -132,6 +135,7 @@ describe("Application interface contract", () => {
 
     const mockApp: Application = {
       config,
+      registry: {} as any,
       workspace: {} as any,
       client: {} as any,
       director: {} as any,

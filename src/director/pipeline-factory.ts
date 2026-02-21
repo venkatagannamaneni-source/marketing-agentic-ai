@@ -8,13 +8,21 @@ import type {
   PipelineTrigger,
 } from "../types/pipeline.ts";
 import type { PipelineTemplate } from "../agents/registry.ts";
+import type { SkillRegistry } from "../agents/skill-registry.ts";
 import { generateTaskId, generateRunId } from "../workspace/id.ts";
 import type { Goal, GoalPlan } from "./types.ts";
 
 // ── Pipeline Factory ─────────────────────────────────────────────────────────
 
 export class PipelineFactory {
-  constructor(private readonly templates: readonly PipelineTemplate[]) {}
+  private readonly skillSquadMap: Record<string, string | null>;
+
+  constructor(
+    private readonly templates: readonly PipelineTemplate[],
+    registry?: SkillRegistry,
+  ) {
+    this.skillSquadMap = registry?.skillSquadMap ?? SKILL_SQUAD_MAP;
+  }
 
   /**
    * Find a template by exact name.
@@ -124,7 +132,7 @@ export class PipelineFactory {
 
     return skills.map((skill) => {
       const taskId = generateTaskId(skill);
-      const squad = SKILL_SQUAD_MAP[skill];
+      const squad = this.skillSquadMap[skill];
       const outputPath = squad
         ? `outputs/${squad}/${skill}/${taskId}.md`
         : `outputs/foundation/${skill}/${taskId}.md`;

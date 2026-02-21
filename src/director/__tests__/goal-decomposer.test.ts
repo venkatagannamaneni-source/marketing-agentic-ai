@@ -4,6 +4,8 @@ import {
   GOAL_CATEGORY_TEMPLATE_MAP,
 } from "../goal-decomposer.ts";
 import { PIPELINE_TEMPLATES } from "../../agents/registry.ts";
+import { SkillRegistry } from "../../agents/skill-registry.ts";
+import type { SkillRegistryData } from "../../agents/skill-registry.ts";
 import { GOAL_CATEGORIES } from "../types.ts";
 import type { GoalCategory } from "../types.ts";
 import { routeGoal } from "../squad-router.ts";
@@ -257,5 +259,78 @@ describe("GoalDecomposer", () => {
         ]),
       ).toBe(true);
     });
+  });
+});
+
+// ── GoalDecomposer with SkillRegistry ─────────────────────────────────────────
+
+describe("GoalDecomposer with SkillRegistry", () => {
+  // Registry where social-content depends on cold-email (reversed from defaults)
+  const registryData: SkillRegistryData = {
+    squads: {
+      creative: { description: "Creative squad" },
+      strategy: { description: "Strategy squad" },
+    },
+    foundation_skill: "product-marketing-context",
+    skills: {
+      "product-marketing-context": {
+        squad: null,
+        description: "Foundation",
+        downstream: "all",
+      },
+      "social-content": {
+        squad: "creative",
+        description: "Social",
+        downstream: ["cold-email"],
+      },
+      "cold-email": {
+        squad: "creative",
+        description: "Email",
+        downstream: [],
+      },
+      "copywriting": {
+        squad: "creative",
+        description: "Copy",
+        downstream: [],
+      },
+      "content-strategy": {
+        squad: "strategy",
+        description: "Strategy",
+        downstream: [],
+      },
+    },
+  };
+
+  const registry = SkillRegistry.fromData(registryData);
+  const decomposerWithRegistry = new GoalDecomposer(PIPELINE_TEMPLATES, registry);
+
+  it("uses registry dependency graph for canRunParallel", () => {
+    // In registry: social-content → cold-email (dependent)
+    expect(
+      decomposerWithRegistry.canRunParallel(["social-content", "cold-email"]),
+    ).toBe(false);
+  });
+
+  it("detects independence using registry graph", () => {
+    // In registry: cold-email and copywriting have no dependency
+    expect(
+      decomposerWithRegistry.canRunParallel(["cold-email", "copywriting"]),
+    ).toBe(true);
+  });
+
+  it("uses hardcoded defaults when no registry is provided", () => {
+    const decomposerNoRegistry = new GoalDecomposer(PIPELINE_TEMPLATES);
+    // In hardcoded defaults: social-content and cold-email have no dependency
+    expect(
+      decomposerNoRegistry.canRunParallel(["social-content", "cold-email"]),
+    ).toBe(true);
+  });
+
+  it("decompose still works with custom registry", () => {
+    const goal = createTestGoal({ category: "content" });
+    const routing = routeGoal("content");
+    const plan = decomposerWithRegistry.decompose(goal, routing);
+    expect(plan.goalId).toBe(goal.id);
+    expect(plan.phases.length).toBeGreaterThan(0);
   });
 });

@@ -7,6 +7,7 @@ import type { Priority, Task } from "../types/task.ts";
 import type { Review } from "../types/review.ts";
 import type { PipelineDefinition, PipelineRun } from "../types/pipeline.ts";
 import { PIPELINE_TEMPLATES } from "../agents/registry.ts";
+import type { SkillRegistry } from "../agents/skill-registry.ts";
 import type {
   Goal,
   GoalCategory,
@@ -20,7 +21,7 @@ import type {
 } from "./types.ts";
 import { DEFAULT_DIRECTOR_CONFIG } from "./types.ts";
 import { WorkspaceError } from "../workspace/errors.ts";
-import { DIRECTOR_SYSTEM_PROMPT } from "./system-prompt.ts";
+import { DIRECTOR_SYSTEM_PROMPT, buildDirectorPrompt } from "./system-prompt.ts";
 import { GoalDecomposer } from "./goal-decomposer.ts";
 import { PipelineFactory } from "./pipeline-factory.ts";
 import { ReviewEngine } from "./review-engine.ts";
@@ -56,6 +57,9 @@ export class MarketingDirector {
   private readonly executorConfig?: ExecutorConfig;
   private readonly executor?: AgentExecutor;
   private readonly humanReviewManager?: HumanReviewManager;
+  private readonly skillSquadMap: Record<string, string | null>;
+  private readonly foundationSkill: string;
+  private readonly directorPrompt: string;
 
   constructor(
     private readonly workspace: WorkspaceManager,
@@ -64,6 +68,7 @@ export class MarketingDirector {
     executorConfig?: ExecutorConfig,
     humanReviewManager?: HumanReviewManager,
     logger?: Logger,
+    registry?: SkillRegistry,
   ) {
     this.config = { ...DEFAULT_DIRECTOR_CONFIG, ...config };
     this.logger = (logger ?? NULL_LOGGER).child({ module: "director" });
@@ -73,8 +78,13 @@ export class MarketingDirector {
       this.executor = new AgentExecutor(client, workspace, executorConfig, this.logger);
     }
     this.humanReviewManager = humanReviewManager;
-    this.goalDecomposer = new GoalDecomposer(PIPELINE_TEMPLATES);
-    this.pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES);
+    this.skillSquadMap = registry?.skillSquadMap ?? SKILL_SQUAD_MAP;
+    this.foundationSkill = registry?.foundationSkill ?? FOUNDATION_SKILL;
+    this.directorPrompt = registry
+      ? buildDirectorPrompt(registry)
+      : DIRECTOR_SYSTEM_PROMPT;
+    this.goalDecomposer = new GoalDecomposer(PIPELINE_TEMPLATES, registry);
+    this.pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES, registry);
     this.reviewEngine = new ReviewEngine(this.config, client);
     this.escalationEngine = new EscalationEngine(this.config);
   }
@@ -244,14 +254,14 @@ export class MarketingDirector {
     // Read the output — handle foundation skill's different output path
     let outputContent = "";
     try {
-      const squad = SKILL_SQUAD_MAP[task.to];
+      const squad = this.skillSquadMap[task.to];
       if (squad) {
         outputContent = await this.workspace.readOutput(
           squad,
           task.to,
           taskId,
         );
-      } else if (task.to === FOUNDATION_SKILL) {
+      } else if (task.to === this.foundationSkill) {
         outputContent = await this.workspace.readFile(
           "context/product-marketing-context.md",
         );
@@ -528,7 +538,7 @@ export class MarketingDirector {
    * Get the Director's system prompt.
    */
   getSystemPrompt(): string {
-    return DIRECTOR_SYSTEM_PROMPT;
+    return this.directorPrompt;
   }
 
   /**

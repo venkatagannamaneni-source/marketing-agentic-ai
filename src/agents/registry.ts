@@ -1,12 +1,14 @@
-import type { SkillName } from "../types/agent.ts";
 import type { Priority } from "../types/task.ts";
 import { SKILL_NAMES } from "../types/agent.ts";
 
 // ── Agent Dependency Graph ───────────────────────────────────────────────────
 // Producer → Consumer relationships from PROJECT_PROPOSAL.md Appendix A.
 // Each key produces output consumed by the listed skills.
+//
+// Default graph — matches .agents/skills.yaml.
+// For runtime extensibility, use SkillRegistry.fromYaml() instead.
 
-export const AGENT_DEPENDENCY_GRAPH: Record<SkillName, readonly SkillName[]> = {
+export const AGENT_DEPENDENCY_GRAPH: Record<string, readonly string[]> = {
   // Foundation — consumed by all 25 other agents
   "product-marketing-context": SKILL_NAMES.filter(
     (s) => s !== "product-marketing-context",
@@ -58,11 +60,11 @@ export const AGENT_DEPENDENCY_GRAPH: Record<SkillName, readonly SkillName[]> = {
 /**
  * Get upstream producers for a given skill (skills whose output this skill consumes).
  */
-export function getUpstreamSkills(skill: SkillName): SkillName[] {
-  const upstream: SkillName[] = [];
+export function getUpstreamSkills(skill: string): string[] {
+  const upstream: string[] = [];
   for (const [producer, consumers] of Object.entries(AGENT_DEPENDENCY_GRAPH)) {
     if ((consumers as readonly string[]).includes(skill)) {
-      upstream.push(producer as SkillName);
+      upstream.push(producer);
     }
   }
   return upstream;
@@ -71,8 +73,8 @@ export function getUpstreamSkills(skill: SkillName): SkillName[] {
 /**
  * Get downstream consumers for a given skill.
  */
-export function getDownstreamSkills(skill: SkillName): readonly SkillName[] {
-  return AGENT_DEPENDENCY_GRAPH[skill];
+export function getDownstreamSkills(skill: string): readonly string[] {
+  return AGENT_DEPENDENCY_GRAPH[skill] ?? [];
 }
 
 // ── Pipeline Templates ───────────────────────────────────────────────────────
@@ -82,7 +84,7 @@ export function getDownstreamSkills(skill: SkillName): readonly SkillName[] {
 export interface PipelineTemplate {
   readonly name: string;
   readonly description: string;
-  readonly steps: readonly (SkillName | readonly SkillName[])[];
+  readonly steps: readonly (string | readonly string[])[];
   readonly trigger: string;
   readonly defaultPriority: Priority;
 }

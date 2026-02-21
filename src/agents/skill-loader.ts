@@ -4,6 +4,7 @@ import type { AgentMeta, SkillName } from "../types/agent.ts";
 import { SKILL_NAMES, SKILL_SQUAD_MAP } from "../types/agent.ts";
 import { parseFrontmatter } from "../workspace/markdown.ts";
 import { WorkspaceError } from "../workspace/errors.ts";
+import type { SkillRegistry } from "./skill-registry.ts";
 
 // ── Default Paths ────────────────────────────────────────────────────────────
 
@@ -13,10 +14,14 @@ const DEFAULT_SKILLS_DIR = ".agents/skills";
 
 /**
  * Load metadata for a single skill from its SKILL.md file.
+ *
+ * If a SkillRegistry is provided, uses its skillSquadMap for squad assignment.
+ * Otherwise falls back to the default SKILL_SQUAD_MAP.
  */
 export async function loadSkillMeta(
   skillName: SkillName,
   projectRoot: string,
+  registry?: SkillRegistry,
 ): Promise<AgentMeta> {
   const skillDir = resolve(projectRoot, DEFAULT_SKILLS_DIR, skillName);
   const skillFilePath = resolve(skillDir, "SKILL.md");
@@ -41,10 +46,13 @@ export async function loadSkillMeta(
 
   const { frontmatter } = parseFrontmatter(content);
 
+  const skillNames = registry ? registry.skillNames : SKILL_NAMES;
+  const squadMap = registry ? registry.skillSquadMap : SKILL_SQUAD_MAP;
+
   const rawName = (frontmatter["name"] as string | undefined) ?? skillName;
   // Validate that parsed name is a known skill (prevents type system bypass)
-  const name: SkillName = (SKILL_NAMES as readonly string[]).includes(rawName)
-    ? (rawName as SkillName)
+  const name: SkillName = skillNames.includes(rawName)
+    ? rawName
     : skillName; // Fall back to the known skillName if frontmatter has unexpected value
   const description = (frontmatter["description"] as string | undefined) ?? "";
   const version = extractVersion(frontmatter);
@@ -55,22 +63,28 @@ export async function loadSkillMeta(
     name,
     description: stripQuotes(description),
     version,
-    squad: SKILL_SQUAD_MAP[skillName] ?? null,
+    squad: squadMap[skillName] ?? null,
     skillFilePath,
     referenceFiles,
   };
 }
 
 /**
- * Load metadata for all 26 skills.
+ * Load metadata for all registered skills.
+ *
+ * If a SkillRegistry is provided, iterates its skillNames (supporting
+ * dynamically added skills from .agents/skills.yaml).
+ * Otherwise falls back to the default SKILL_NAMES.
  */
 export async function loadAllSkills(
   projectRoot: string,
+  registry?: SkillRegistry,
 ): Promise<Map<SkillName, AgentMeta>> {
   const skills = new Map<SkillName, AgentMeta>();
+  const skillNames = registry ? registry.skillNames : SKILL_NAMES;
 
-  for (const skillName of SKILL_NAMES) {
-    const meta = await loadSkillMeta(skillName, projectRoot);
+  for (const skillName of skillNames) {
+    const meta = await loadSkillMeta(skillName, projectRoot, registry);
     skills.set(skillName, meta);
   }
 
