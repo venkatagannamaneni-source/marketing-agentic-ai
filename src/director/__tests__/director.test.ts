@@ -708,6 +708,18 @@ describe("MarketingDirector with SkillRegistry", () => {
     expect(goal.category).toBe("content");
   });
 
+  it("getSystemPrompt returns dynamic prompt from registry", () => {
+    const prompt = directorWithRegistry.getSystemPrompt();
+    // Dynamic prompt reflects registry, not the hardcoded 26/5
+    expect(prompt).toContain("8 specialized marketing AI agents");
+    expect(prompt).toContain("5 squads");
+    expect(prompt).toContain("### Custom-convert Squad");
+    expect(prompt).toContain("- page-cro: Page CRO");
+    expect(prompt).toContain("- copywriting: Copy");
+    // Should NOT contain hardcoded "26" count
+    expect(prompt).not.toContain("26 specialized");
+  });
+
   it("decomposeGoal still works with registry", async () => {
     const goal = await directorWithRegistry.createGoal(
       "Build content pipeline",

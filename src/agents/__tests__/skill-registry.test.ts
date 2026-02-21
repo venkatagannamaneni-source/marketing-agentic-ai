@@ -66,6 +66,22 @@ describe("SkillRegistry.fromData", () => {
     expect(registry.squadDescriptions["beta"]).toBe("Beta squad");
   });
 
+  it("builds skill descriptions", () => {
+    const registry = SkillRegistry.fromData(MINIMAL_DATA);
+    expect(registry.skillDescriptions["foundation"]).toBe("Foundation skill");
+    expect(registry.skillDescriptions["skill-a"]).toBe("Skill A");
+    expect(registry.skillDescriptions["skill-b"]).toBe("Skill B");
+  });
+
+  it("has a description for every skill", () => {
+    const registry = SkillRegistry.fromData(MINIMAL_DATA);
+    for (const skill of registry.skillNames) {
+      const desc = registry.skillDescriptions[skill];
+      expect(desc).toBeDefined();
+      expect(desc!.length).toBeGreaterThan(0);
+    }
+  });
+
   it("expands 'downstream: all' to all other skills", () => {
     const registry = SkillRegistry.fromData(MINIMAL_DATA);
     const consumers = registry.dependencyGraph["foundation"];
@@ -246,6 +262,13 @@ describe("SkillRegistry immutability", () => {
     const registry = SkillRegistry.fromData(MINIMAL_DATA);
     expect(() => {
       (registry.squadDescriptions as Record<string, string>)["new"] = "hacked";
+    }).toThrow();
+  });
+
+  it("skillDescriptions is frozen", () => {
+    const registry = SkillRegistry.fromData(MINIMAL_DATA);
+    expect(() => {
+      (registry.skillDescriptions as Record<string, string>)["new"] = "hacked";
     }).toThrow();
   });
 });

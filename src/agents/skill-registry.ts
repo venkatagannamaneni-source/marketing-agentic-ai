@@ -46,6 +46,7 @@ export class SkillRegistry {
   readonly skillSquadMap: Record<string, string | null>;
   readonly dependencyGraph: Record<string, readonly string[]>;
   readonly squadDescriptions: Record<string, string>;
+  readonly skillDescriptions: Record<string, string>;
 
   private constructor(data: SkillRegistryData) {
     this.squadNames = Object.freeze(Object.keys(data.squads));
@@ -58,6 +59,13 @@ export class SkillRegistry {
       descs[name] = squad.description;
     }
     this.squadDescriptions = Object.freeze(descs);
+
+    // Build skill descriptions
+    const skillDescs: Record<string, string> = {};
+    for (const [name, skill] of Object.entries(data.skills)) {
+      skillDescs[name] = skill.description;
+    }
+    this.skillDescriptions = Object.freeze(skillDescs);
 
     // Build skill → squad map
     const sqMap: Record<string, string | null> = {};

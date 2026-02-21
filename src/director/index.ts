@@ -24,7 +24,7 @@ export {
 } from "./types.ts";
 
 // ── System Prompt ────────────────────────────────────────────────────────────
-export { DIRECTOR_SYSTEM_PROMPT } from "./system-prompt.ts";
+export { DIRECTOR_SYSTEM_PROMPT, buildDirectorPrompt } from "./system-prompt.ts";
 
 // ── Squad Router ─────────────────────────────────────────────────────────────
 export { routeGoal, selectSkills, ROUTING_RULES } from "./squad-router.ts";

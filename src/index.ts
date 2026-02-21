@@ -175,6 +175,7 @@ export {
   BUDGET_LEVELS,
   DEFAULT_DIRECTOR_CONFIG,
   DIRECTOR_SYSTEM_PROMPT,
+  buildDirectorPrompt,
   routeGoal,
   selectSkills,
   ROUTING_RULES,
