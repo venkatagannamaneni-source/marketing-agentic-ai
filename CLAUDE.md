@@ -4,9 +4,11 @@
 
 A self-operating marketing team — 26 AI agents in 5 squads + a Director, powered by Claude. Agents strategize, create, optimize, measure, and iterate across the full marketing funnel.
 
-## Current State: Phase 1 + 2 Complete, Integration Verified
+## Current State: Phase 1 + 2 Complete, Phases 3-6 Designed
 
 Phase 2 built the 24/7 runtime engine on top of Phase 1's backend. 14 modules, 1472+ tests across 68 files. The system can accept a natural-language goal, decompose it into tasks, execute them through pipelines, schedule recurring work, react to external events, and track costs — all with structured logging and health monitoring.
+
+**Remaining roadmap:** Phase 3 (Semantic Review, weeks 9-12) → Phase 4 (30+ MCP Tool Integrations, weeks 13-20) → Phase 5 (Feedback Loops, weeks 21-26) → Phase 6 (Dashboard + SaaS, weeks 27-34).
 
 **Real Claude API integration verified** — 23 tests make live API calls (Haiku model, ~$0.01/test). Full 5-step Content Production pipeline runs end-to-end in ~4 minutes. All 26 skill SKILL.md files load successfully. Director structural review approves real Claude output.
 

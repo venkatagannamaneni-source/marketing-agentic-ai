@@ -6,6 +6,8 @@ A **self-operating marketing team** — 26 specialized AI agents organized into 
 
 This is not a toolkit where a human picks one skill at a time. This is **a team that runs autonomously**, the way a real marketing department operates — except it never sleeps.
 
+**Critical distinction:** This system doesn't just *advise* — it *acts*. Agents don't produce documents for humans to implement. They publish to your CMS, deploy email sequences, create ad campaigns, read real analytics, and optimize based on actual performance data. Through 30+ MCP server integrations, every agent can execute through real tools — the same tools a human marketing team would use.
+
 ---
 
 ## 1. Project Feasibility Assessment
@@ -28,12 +30,17 @@ Three capabilities make this possible:
 | Shared product context | **Done** | product-marketing-context.md consumed by 25/26 agents |
 | Cross-skill dependency map | **Done** | Related Skills sections define the collaboration graph |
 | Bun + TypeScript runtime | **Done** | Project scaffolded with Bun, Playwright, TypeScript |
-| Marketing Director (supervisor agent) | **Not built** | The brain that decomposes goals into tasks and assigns agents |
-| Inter-agent handoff protocol | **Not built** | Structured output/input contracts between agents |
-| Shared workspace | **Not built** | File system where agents read/write task artifacts |
-| 24/7 runtime engine | **Not built** | Scheduler, event bus, queue, monitoring |
-| Feedback loops | **Not built** | Analytics → optimization → measurement cycles |
-| MCP integrations | **Not built** | Connections to GA4, CMS, email, ad platforms |
+| Marketing Director (supervisor agent) | **Done** | Goal decomposition, squad routing, pipeline selection, review, escalation |
+| Inter-agent handoff protocol | **Done** | Task handoff format, review protocol, output passing between agents |
+| Shared workspace | **Done** | File-based workspace with tasks, outputs, reviews, learnings, goals, schedules |
+| 24/7 runtime engine | **Done** | Scheduler (6 cron jobs), event bus (5 mappings), BullMQ queue, health monitor |
+| Agent executor with Claude API | **Done** | Real Anthropic API integration, model selection, prompt building, output parsing |
+| Cost tracking and budget gating | **Done** | 5 budget states (normal → exhausted), per-task cost logging |
+| Semantic review (Claude-powered) | **Not built** | Director uses Claude to judge quality, not just regex patterns |
+| MCP integrations (30+ tools) | **Not built** | Connections to GA4, CMS, email, ads, social, SEO tools, payments |
+| Feedback loops | **Not built** | Analytics → optimization → measurement → re-optimization cycles |
+| Web dashboard + API | **Not built** | Web UI for goal management, pipeline monitoring, escalation handling |
+| Multi-tenancy + billing | **Not built** | Auth, per-tenant isolation, Stripe billing |
 
 ---
 
@@ -98,7 +105,31 @@ Three capabilities make this possible:
 │  └────────────────────────────────────────────────────────────────┘  │
 │                                                                       │
 ├──────────────────────────────────────────────────────────────────────┤
-│  MCP SERVERS: Railway · GA4 · CMS · Email · Ads · Search Console    │
+│                    INTEGRATION LAYER (MCP Servers)                    │
+│                                                                       │
+│  ANALYTICS         PUBLISHING        EMAIL              ADS          │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌───────────┐  │
+│  │ GA4          │  │ WordPress   │  │ Mailchimp   │  │ Google    │  │
+│  │ Search Consol│  │ Webflow     │  │ Customer.io │  │ Meta      │  │
+│  │ GTM          │  │ Contentful  │  │ Resend      │  │ LinkedIn  │  │
+│  │ PageSpeed    │  │ GitHub      │  │ SendGrid    │  │           │  │
+│  │ Mixpanel     │  │             │  │             │  │           │  │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └───────────┘  │
+│                                                                       │
+│  SOCIAL            SEO TOOLS        PAYMENTS         COMMS           │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌───────────┐  │
+│  │ LinkedIn API │  │ Ahrefs      │  │ Stripe      │  │ Slack     │  │
+│  │ Twitter/X    │  │ SEMrush     │  │ Rewardful   │  │ Discord   │  │
+│  │ Buffer       │  │ Screaming F.│  │             │  │ Railway   │  │
+│  │              │  │             │  │             │  │           │  │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └───────────┘  │
+│                                                                       │
+│  BROWSER           RESEARCH                                          │
+│  ┌─────────────┐  ┌─────────────┐                                    │
+│  │ Playwright   │  │ Web Fetch   │                                    │
+│  │ (page analy.)│  │ Google Trend│                                    │
+│  │              │  │ Reddit/Quora│                                    │
+│  └─────────────┘  └─────────────┘                                    │
 ├──────────────────────────────────────────────────────────────────────┤
 │  CLAUDE (Opus for Director + Strategy · Sonnet for execution)       │
 └──────────────────────────────────────────────────────────────────────┘
@@ -429,17 +460,108 @@ The critical difference from the old proposal: **the loop never terminates**. Th
 | **Deployment** | Railway (MCP server already configured) | Cloud hosting with autoscaling |
 | **Monitoring** | Structured logging + error tracking | Agent execution visibility |
 
-### MCP Server Integrations
+### MCP Server Integrations — Full Integration Map
 
-| MCP Server | Agents That Use It | Purpose |
+The system needs external tool integrations so agents **execute work**, not just advise. Without these, agents produce markdown documents that a human must manually implement. With these, agents act — they publish, deploy, track, and optimize through real platforms.
+
+#### Tier 1: Analytics & Measurement (Measure Squad)
+
+| MCP Server | Agents That Use It | Purpose | Actions |
+|---|---|---|---|
+| **Google Analytics 4** | analytics-tracking, ab-test-setup, Director | Read live metrics, conversion data | Read reports, query events, get real-time data, create custom dimensions |
+| **Google Tag Manager** | analytics-tracking | Deploy tracking events without code changes | Create/update tags, triggers, variables, publish containers |
+| **Google Search Console** | seo-audit, programmatic-seo, content-strategy | Search rankings, indexation, crawl data | Read performance reports, submit sitemaps, request indexing |
+| **PageSpeed Insights** | seo-audit, page-cro | Core Web Vitals, performance scores | Run audits, read Lighthouse reports |
+| **Mixpanel / PostHog** | analytics-tracking, onboarding-cro | Product analytics, funnel analysis | Query funnels, cohorts, retention data |
+
+#### Tier 2: Content Publishing (Creative Squad)
+
+| MCP Server | Agents That Use It | Purpose | Actions |
+|---|---|---|---|
+| **CMS (WordPress)** | copywriting, programmatic-seo, schema-markup, social-content | Publish content directly | Create/update posts, pages, custom fields, meta tags, structured data |
+| **CMS (Webflow)** | copywriting, programmatic-seo, page-cro | Design-integrated publishing | Create/update CMS items, publish pages, update static content |
+| **CMS (Contentful/Sanity)** | copywriting, programmatic-seo | Headless CMS publishing | Create/update entries, publish assets, manage content models |
+| **GitHub** | programmatic-seo, schema-markup | Code-based content deployment | Create PRs for template pages, schema changes, config updates |
+
+#### Tier 3: Email & Marketing Automation (Activate Squad)
+
+| MCP Server | Agents That Use It | Purpose | Actions |
+|---|---|---|---|
+| **Mailchimp** | email-sequence, cold-email | SMB email marketing | Create campaigns, audiences, automations, read engagement data |
+| **Customer.io** | email-sequence, onboarding-cro | Behavior-triggered automation | Create segments, campaigns, workflows, read delivery/engagement metrics |
+| **Resend** | email-sequence, cold-email | Developer-friendly transactional email | Send emails, manage domains, read delivery stats |
+| **SendGrid** | email-sequence | Transactional email at scale | Create templates, send emails, read analytics |
+
+#### Tier 4: Advertising Platforms (Creative Squad)
+
+| MCP Server | Agents That Use It | Purpose | Actions |
+|---|---|---|---|
+| **Google Ads** | paid-ads, analytics-tracking | Search + display campaigns | Create campaigns, ad groups, ads, keywords, read performance reports |
+| **Meta Ads (Facebook/Instagram)** | paid-ads, social-content | Social advertising | Create campaigns, ad sets, ads, audiences, read ROAS data |
+| **LinkedIn Ads** | paid-ads | B2B advertising | Create campaigns, targeting, read engagement data |
+
+#### Tier 5: Social Media (Creative Squad)
+
+| MCP Server | Agents That Use It | Purpose | Actions |
+|---|---|---|---|
+| **LinkedIn API** | social-content | Organic social posting | Create posts, articles, read engagement metrics |
+| **Twitter/X API** | social-content | Organic social posting | Create tweets/threads, schedule posts, read analytics |
+| **Buffer / Hootsuite** | social-content | Cross-platform scheduling | Schedule posts, manage queue, read engagement across platforms |
+
+#### Tier 6: SEO Tools (Measure + Strategy Squads)
+
+| MCP Server | Agents That Use It | Purpose | Actions |
+|---|---|---|---|
+| **Ahrefs** | seo-audit, content-strategy, competitor-alternatives | Backlink analysis, keyword research | Query keyword data, backlink profiles, competitor traffic estimates |
+| **SEMrush** | seo-audit, content-strategy, competitor-alternatives | Keyword + competitor research | Query keyword volumes, competitor rankings, site audit data |
+| **Screaming Frog** | seo-audit | Technical SEO crawling | Trigger crawls, read crawl reports, detect broken links/redirects |
+
+#### Tier 7: Payments & Monetization (Activate Squad)
+
+| MCP Server | Agents That Use It | Purpose | Actions |
+|---|---|---|---|
+| **Stripe** | pricing-strategy, paywall-upgrade-cro, referral-program | Payment + subscription data | Read MRR, churn rate, plan distribution, trial conversions |
+| **Rewardful / Tolt** | referral-program | Affiliate tracking | Create affiliate programs, read referral data, manage commissions |
+
+#### Tier 8: Communication & Notifications (Director)
+
+| MCP Server | Agents That Use It | Purpose | Actions |
+|---|---|---|---|
+| **Slack** | Director | Human-in-the-loop communication | Send status updates, escalations, approval requests, receive commands |
+| **Discord** | Director | Community team communication | Send notifications, receive commands |
+| **Railway** | Director, all agents (deployment) | Deploy and manage infrastructure | Deploy services, read logs, manage environments |
+
+#### Tier 9: Research & Competitive Intelligence (Strategy Squad)
+
+| MCP Server | Agents That Use It | Purpose | Actions |
+|---|---|---|---|
+| **Web Fetch / Playwright** | competitor-alternatives, page-cro, seo-audit | Read and analyze external pages | Fetch pages, screenshot, extract content, run Lighthouse |
+| **Google Trends** | content-strategy, marketing-ideas | Trend and seasonality data | Query interest over time, related queries, regional data |
+| **Reddit / Quora APIs** | content-strategy, marketing-psychology | Audience language and pain points | Search discussions, extract common language patterns |
+
+### From Advisor to Executor — The Integration Impact
+
+This table shows what each agent does **without** tool integrations vs **with** them:
+
+| Agent | Without MCP (Advisory) | With MCP (Executor) |
 |---|---|---|
-| **Railway** | Director, all agents (deployment) | Deploy and manage infrastructure |
-| **Google Analytics 4** | analytics-tracking, ab-test-setup, Director | Read live metrics, conversion data |
-| **Google Search Console** | seo-audit, programmatic-seo | Search rankings, indexing status |
-| **CMS (WordPress/Webflow)** | copywriting, programmatic-seo, schema-markup | Publish content directly |
-| **Email (Customer.io/Resend)** | email-sequence, cold-email | Deploy and monitor email sequences |
-| **Ad Platforms (Google/Meta)** | paid-ads | Deploy campaigns, read performance |
-| **Slack/Discord** | Director | Status updates, escalations, approvals |
+| **copywriting** | Produces markdown copy document | Publishes directly to CMS, creates draft pages |
+| **email-sequence** | Writes email copy in a file | Deploys full automation sequence to Customer.io/Mailchimp |
+| **paid-ads** | Designs campaign structure on paper | Creates campaigns, ad groups, and ads in Google/Meta |
+| **social-content** | Writes posts in markdown | Schedules posts to LinkedIn, Twitter/X via Buffer |
+| **analytics-tracking** | Writes a tracking plan document | Sets up events in GA4/GTM, creates dashboards |
+| **ab-test-setup** | Designs test hypothesis document | Creates experiment in testing platform, monitors results |
+| **seo-audit** | Generic audit checklist | Reads real Search Console + Ahrefs data, flags actual issues |
+| **schema-markup** | Generates JSON-LD code blocks | Pushes structured data to CMS, validates via Rich Results API |
+| **programmatic-seo** | Template outline in markdown | Creates 100+ CMS pages from templates + data |
+| **competitor-alternatives** | Generic comparison document | Scrapes real competitor pages, uses real pricing data |
+| **email-sequence** | Generic nurture sequence | Reads open/click rates from ESP, iterates on underperformers |
+| **page-cro** | Generic CRO suggestions | Analyzes real page via Playwright, reads GA4 bounce data |
+| **onboarding-cro** | Onboarding recommendations | Reads activation data from product analytics, targets real drop-offs |
+| **pricing-strategy** | Pricing framework document | Reads Stripe MRR/churn data, recommends based on real numbers |
+| **referral-program** | Program design document | Creates program in Rewardful, tracks real referral data |
+
+**This is the fundamental difference.** Without integrations, the system is a fancy document generator. With them, it's a team that ships.
 
 ---
 
@@ -568,76 +690,173 @@ DAY 1 — DIRECTOR receives goal
 
 ## 10. Implementation Roadmap
 
-### Phase 1: Director + Orchestration Engine (Weeks 1-4)
+### Phase 1: Director + Orchestration Engine (Weeks 1-4) — COMPLETE ✓
 
-This is the product. Build this first.
+The core product. 26 agents orchestrated by a Marketing Director, executing through sequential and parallel pipelines.
 
-| Week | Task | Details |
-|---|---|---|
-| 1 | **Marketing Director agent** | Build the supervisor agent that decomposes goals, assigns tasks to squads, and reviews outputs. Uses Claude Opus. Define its system prompt, decision rules, and escalation criteria. |
-| 1 | **Shared workspace** | Create the file-based workspace structure: `context/`, `tasks/`, `outputs/`, `reviews/`, `metrics/`, `memory/`. Define read/write conventions. |
-| 2 | **Inter-agent protocol** | Implement the task handoff format and review protocol. Build the agent executor that loads SKILL.md + context, calls Claude API, and writes output to workspace. |
-| 2 | **Sequential pipeline engine** | Build the pipeline runner that chains agents in sequence: Agent A output → Agent B input. Start with the Content Production pipeline. |
-| 3 | **Parallel execution** | Add support for parallel agent execution within a pipeline (e.g., copywriting + email-sequence + social-content running simultaneously). |
-| 3 | **Task queue** | Implement BullMQ priority queue. Director adds tasks, executor processes them. P0 tasks preempt P2 tasks. |
-| 4 | **Director review loop** | Director reads agent outputs, decides approve/revise/reject, and either triggers the next pipeline step or sends revision requests. |
-| 4 | **End-to-end test** | Run a complete pipeline: goal → Director → Strategy Squad → Creative Squad → Review → Output. Validate the full flow. |
+| Week | Task | Details | Status |
+|---|---|---|---|
+| 1 | **Marketing Director agent** | Supervisor agent: goal decomposition, squad routing, pipeline selection, escalation engine. Uses Claude Opus. | ✓ Done |
+| 1 | **Shared workspace** | File-based workspace: `context/`, `tasks/`, `outputs/`, `reviews/`, `metrics/`, `memory/`, `goals/`, `schedules/`. | ✓ Done |
+| 2 | **Inter-agent protocol** | Task handoff format, review protocol. Agent executor: loads SKILL.md + context, calls Claude API, writes output. | ✓ Done |
+| 2 | **Sequential pipeline engine** | Pipeline runner chains agents in sequence. 8 pipeline templates built. | ✓ Done |
+| 3 | **Parallel execution** | Parallel agent execution within pipelines with configurable concurrency. | ✓ Done |
+| 3 | **Task queue** | BullMQ priority queue (P0-P3). Budget gate, failure tracker, completion router, fallback queue. | ✓ Done |
+| 4 | **Director review loop** | ReviewEngine evaluates outputs (structural checks). Approve/revise/reject decisions. | ✓ Done |
+| 4 | **End-to-end test** | Full pipeline verified with real Claude API calls. 23 live API tests pass. | ✓ Done |
 
-**Deliverable:** A working system where you give the Director a goal and it orchestrates agents to deliver results.
+**Delivered:** 14 modules, 1472+ tests, 68 files. Real Claude API integration verified end-to-end.
 
-### Phase 2: 24/7 Runtime (Weeks 5-6)
+### Phase 2: 24/7 Runtime (Weeks 5-8) — COMPLETE ✓
 
-| Week | Task | Details |
-|---|---|---|
-| 5 | **Scheduler** | Implement cron-based recurring pipelines (daily social content, weekly content cycle, monthly CRO sprint). |
-| 5 | **Event bus** | Build webhook listener for external events (traffic drops, competitor changes, A/B test significance). Map events to pipeline triggers. |
-| 6 | **Monitoring and logging** | Structured logging for every agent execution (tokens, time, input size, output quality). Dashboard for runtime health. |
-| 6 | **Memory system** | Implement `memory/learnings.md` — Director writes outcomes of completed goals. Agents read past learnings before starting work. |
+| Week | Task | Details | Status |
+|---|---|---|---|
+| 5-6 | **Scheduler** | Cron-based recurring pipelines: 6 default schedules (daily social, daily review, weekly content, weekly SEO, monthly CRO, monthly performance). Budget gating + overlap protection. | ✓ Done |
+| 5-6 | **Event bus** | Webhook listener (Bun.serve) with bearer token auth. 5 default event mappings with conditions, cooldowns, dedup. | ✓ Done |
+| 7 | **Monitoring and logging** | Structured logging (pino), cost tracker with budget state transitions, metrics collector, health monitor with degradation levels. | ✓ Done |
+| 7-8 | **Memory system** | Agents read past learnings before executing. Director writes outcomes. Learning context injected into prompts. | ✓ Done |
+| 8 | **CLI + Bootstrap** | Three modes (goal, pipeline, daemon). Composition root wiring 14 modules. SIGTERM/SIGINT handlers. | ✓ Done |
 
-**Deliverable:** The system runs continuously without human intervention. Scheduled pipelines fire on cron. Events trigger reactive pipelines.
+**Delivered:** System runs 24/7 via CLI. Scheduled pipelines, event-driven triggers, cost tracking, health monitoring.
 
-### Phase 3: External Integrations (Weeks 7-10)
+### Phase 3: Intelligence + Semantic Review (Weeks 9-12)
 
-| Week | Task | Details |
-|---|---|---|
-| 7 | **Playwright page analysis** | CRO and SEO agents fetch and analyze real pages via Playwright. Already installed (v1.56.1). |
-| 7 | **GA4 MCP server** | analytics-tracking and ab-test-setup read live metrics from Google Analytics. |
-| 8 | **CMS MCP server** | copywriting and programmatic-seo publish content directly to WordPress/Webflow. |
-| 9 | **Email MCP server** | email-sequence and cold-email deploy sequences to Customer.io/Resend. |
-| 10 | **Railway deployment** | Deploy the full runtime engine to Railway (MCP server already configured). Auto-scaling based on queue depth. |
-
-**Deliverable:** End-to-end execution — agents don't just plan, they deploy to real platforms and read real data.
-
-### Phase 4: Feedback Loops (Weeks 11-14)
+**The phase that turns output generation into quality-assured output.** Currently the Director does structural pattern-matching (regex checks for markdown sections). This phase replaces that with Claude-powered semantic evaluation — the Director will actually *read and judge* agent work.
 
 | Week | Task | Details |
 |---|---|---|
-| 11 | **Analytics → Optimization loop** | analytics-tracking reads GA4 → detects anomalies → Director triggers page-cro or copywriting. |
-| 12 | **A/B test → Iteration loop** | ab-test-setup monitors tests → declares winners → Director assigns implementation of winning variant. |
-| 13 | **SEO → Content loop** | seo-audit detects ranking drops → Director triggers content-strategy + programmatic-seo response. |
-| 14 | **Competitive response loop** | Monitor competitor pages → competitor-alternatives auto-updates comparison content. |
+| 9 | **Claude-powered semantic review** | Replace structural-only ReviewEngine with Claude-powered evaluation. Director sends output + task requirements + SKILL.md quality criteria to Claude and gets a real APPROVE/REVISE/REJECT decision with specific feedback. |
+| 9 | **Quality scoring model** | Define scoring rubric per agent type: copy quality (clarity, persuasion, voice alignment), SEO quality (keyword density, intent match), CRO quality (hypothesis strength, expected lift). Director assigns numeric quality scores (1-10) that feed into learnings. |
+| 10 | **Multi-pass review chains** | Creative outputs go through review chains: copywriting → copy-editing → page-cro review → Director final approval. Each reviewer uses Claude to provide real feedback, not just structural checks. |
+| 10 | **Revision loops with feedback** | When Director sends REVISE, the revision request includes specific feedback from Claude. The agent re-executes with both the original task and the revision notes, producing genuinely improved output (not just retry). |
+| 11 | **Learning validation** | A/B test: run the same tasks with and without past learnings context. Measure quality score difference. Validate that the memory system actually improves output over time. Prune learnings that don't help. |
+| 11 | **Output comparison** | Director can compare multiple outputs for the same task (e.g., 3 headline variants) and select the best one using Claude evaluation, with reasoning logged to learnings. |
+| 12 | **Cross-agent consistency check** | Director validates consistency across a pipeline's outputs: Does the email sequence match the landing page copy? Does the social content align with the blog post? Flag and resolve contradictions. |
+| 12 | **Integration tests for semantic review** | End-to-end tests: goal → agents → semantic review → revision → final approval. Verify quality scores, revision loops, and learning extraction all work with real Claude API. |
 
-**Deliverable:** The system improves itself. It measures results, learns what works, and iterates autonomously.
+**Deliverable:** The Director can actually judge quality, give real feedback, and drive genuine improvement through revision. Output quality becomes measurable and improvable.
 
-### Phase 5: Dashboard + API (Weeks 15-20)
+### Phase 4: Tool Integration + Real Execution (Weeks 13-20)
+
+**The phase that transforms the system from a document generator into a team that ships.** This is the biggest phase because it connects agents to real external tools via MCP servers. Without this phase, every agent output is a markdown file a human must manually implement. After this phase, agents publish, deploy, track, and optimize through real platforms.
+
+#### Phase 4a: Analytics & Measurement Tools (Weeks 13-14)
+
+Agents can read real performance data, not work from assumptions.
 
 | Week | Task | Details |
 |---|---|---|
-| 15-16 | **Web dashboard** | View active goals, task queue, agent outputs, and performance metrics. Approve/reject escalated outputs. |
-| 17-18 | **API** | REST/GraphQL API for programmatic goal submission, output retrieval, and configuration. |
-| 19-20 | **Multi-tenant** | Authentication, billing, per-user product contexts, team collaboration. |
+| 13 | **GA4 MCP integration** | analytics-tracking reads real data: page views, conversion rates, bounce rates, user flow. ab-test-setup reads experiment results. Director reads KPI dashboards. Requires: Google Analytics Data API (OAuth2). |
+| 13 | **Google Search Console MCP** | seo-audit reads real ranking data: impressions, clicks, CTR by query, index coverage. content-strategy identifies real keyword opportunities. Requires: Search Console API (OAuth2). |
+| 14 | **Google Tag Manager MCP** | analytics-tracking deploys tracking events without manual code changes: creates tags, triggers, variables, publishes containers. Requires: Tag Manager API (OAuth2). |
+| 14 | **PageSpeed / Lighthouse MCP** | seo-audit runs real performance audits: Core Web Vitals scores, performance recommendations. page-cro reads real load times. Requires: PageSpeed Insights API (API key). |
 
-**Deliverable:** Commercial product that customers can self-serve.
+#### Phase 4b: Content Publishing Tools (Weeks 15-16)
 
-### Resource requirements
+Agents can publish content directly — no human copy-pasting from markdown files.
 
-| Phase | People | Monthly cost |
+| Week | Task | Details |
 |---|---|---|
-| Phase 1 (Director + Engine) | 1-2 developers | $500-1K (Claude API) |
-| Phase 2 (24/7 Runtime) | 1-2 developers | $1K-2K (API + Redis) |
-| Phase 3 (Integrations) | 2 developers | $2K-5K (API + hosting + MCP servers) |
-| Phase 4 (Feedback Loops) | 2 developers + 1 marketer | $3K-5K |
-| Phase 5 (Dashboard + API) | 3 developers + 1 designer | $10K-20K |
+| 15 | **WordPress MCP integration** | copywriting creates/updates posts and pages. programmatic-seo publishes template pages at scale. schema-markup pushes JSON-LD structured data. Requires: WordPress REST API (application password or OAuth). |
+| 15 | **Webflow MCP integration** | copywriting publishes to Webflow CMS collections. page-cro updates page content for optimization. Requires: Webflow API (API token). |
+| 16 | **GitHub MCP integration** | programmatic-seo creates PRs for template page code. schema-markup commits structured data changes. Agents can propose code changes for developer review. Requires: GitHub API (PAT or GitHub App). |
+| 16 | **Playwright page analysis** | page-cro and seo-audit fetch and analyze real pages: screenshot, extract DOM, run accessibility checks. competitor-alternatives scrapes competitor pages for real pricing/feature data. Already installed (v1.56.1). |
+
+#### Phase 4c: Email & Marketing Automation (Weeks 17-18)
+
+Agents deploy real email sequences and automations — not just write copy.
+
+| Week | Task | Details |
+|---|---|---|
+| 17 | **Mailchimp MCP integration** | email-sequence creates campaigns and automation workflows. cold-email manages audiences and sends. Analytics reads engagement data (open rates, click rates). Requires: Mailchimp Marketing API (API key). |
+| 17 | **Customer.io MCP integration** | email-sequence creates behavior-triggered workflows. onboarding-cro deploys activation sequences triggered by product events. Reads delivery and engagement metrics. Requires: Customer.io API (API key). |
+| 18 | **Resend MCP integration** | email-sequence and cold-email send transactional emails. Reads delivery stats. Requires: Resend API (API key). |
+| 18 | **ESP-agnostic abstraction layer** | Build a unified email interface so agents don't need to know which ESP the user has. Agent calls `sendSequence()` → adapter routes to Mailchimp, Customer.io, or Resend based on config. |
+
+#### Phase 4d: Advertising & Social Platforms (Weeks 19-20)
+
+Agents create and manage real ad campaigns and social content.
+
+| Week | Task | Details |
+|---|---|---|
+| 19 | **Google Ads MCP integration** | paid-ads creates campaigns, ad groups, keywords, and ad copy. Reads performance data (CPC, CTR, ROAS, conversion rate). Requires: Google Ads API (OAuth2 + developer token). |
+| 19 | **Meta Ads MCP integration** | paid-ads creates Facebook/Instagram campaigns with audience targeting. social-content promotes high-performing organic posts. Reads ROAS data. Requires: Meta Marketing API (system user token). |
+| 20 | **Social media MCP integrations** | social-content schedules posts to LinkedIn (LinkedIn API), Twitter/X (Twitter API v2). Buffer/Hootsuite integration for cross-platform scheduling. Reads engagement metrics per platform. |
+| 20 | **Stripe MCP integration** | pricing-strategy reads real MRR, churn rate, plan distribution, trial conversion rates. paywall-upgrade-cro reads upgrade funnel data. referral-program tracks referral revenue. Requires: Stripe API (secret key, read-only). |
+
+**Deliverable:** Agents don't just plan — they execute. Content gets published. Emails get deployed. Ads get created. Analytics get read. The system becomes a team that ships.
+
+### Phase 5: Feedback Loops + Self-Optimization (Weeks 21-26)
+
+**The phase that makes the system intelligent.** With real tools connected (Phase 4) and semantic review (Phase 3), the system can now close the loop: measure results → detect underperformance → re-optimize → measure again. This is what makes it a *self-operating* marketing team, not just an automation pipeline.
+
+| Week | Task | Details |
+|---|---|---|
+| 21 | **Analytics → Optimization loop** | analytics-tracking reads GA4 weekly. Director compares metrics to goal targets. If conversion rate drops >10%, Director triggers page-cro → copywriting → ab-test-setup pipeline automatically. |
+| 21 | **A/B test → Iteration loop** | ab-test-setup monitors running experiments. When a test reaches statistical significance, Director reads the result, implements the winning variant (via CMS MCP), and logs learnings. Losing variants are analyzed — why did they fail? |
+| 22 | **SEO → Content loop** | seo-audit reads Search Console weekly. Detects ranking drops for target keywords. Director triggers content-strategy (update content plan) → copywriting (refresh underperforming content) → programmatic-seo (build supporting pages). |
+| 22 | **Email performance loop** | email-sequence reads ESP engagement data. Identifies underperforming emails (below benchmark open/click rates). Director triggers revision: cold-email rewrites subject lines, email-sequence adjusts send timing, ab-test-setup designs split tests. |
+| 23 | **Competitive response loop** | competitor-alternatives monitors competitor pages via Playwright (weekly scrapes). Detects: new features launched, pricing changes, new comparison pages targeting us. Director triggers: update comparison pages, adjust ad copy, revise positioning if needed. |
+| 23 | **Ad optimization loop** | paid-ads reads Google/Meta campaign performance. Identifies: high-CPC keywords to pause, winning ad variants to scale, audience segments underperforming. Director adjusts budget allocation and triggers new ad variant creation. |
+| 24 | **Social content optimization loop** | social-content reads engagement metrics per platform. Identifies: best-performing content types, optimal posting times, high-engagement topics. Director adjusts content calendar and content-strategy priorities based on real social data. |
+| 24 | **Compound learning system** | Director aggregates learnings across all loops into a structured knowledge base. Pattern detection: "Short headlines convert 23% better on our landing pages" → applied automatically to all future copywriting tasks. |
+| 25 | **Budget reallocation engine** | Director reads ROI data across channels (ads, email, content, social). Automatically shifts budget from low-ROI channels to high-ROI ones. Reports reallocation decisions and reasoning to learnings. |
+| 25 | **Anomaly detection + alerting** | HealthMonitor watches all connected data sources. Detects anomalies: traffic drops >20%, conversion drops >10%, cost spikes, email deliverability issues. Triggers appropriate response pipeline or escalates to human. |
+| 26 | **Self-healing pipelines** | When a pipeline fails, Director analyzes the failure, adjusts the strategy (simpler task decomposition, different agent assignment, reduced scope), and retries. Up to 3 self-healing attempts before escalation. |
+| 26 | **Integration tests for feedback loops** | End-to-end tests with mock external data: simulate GA4 showing conversion drop → verify system detects it → triggers optimization → produces revised output → "deploys" fix. |
+
+**Deliverable:** The system improves itself. It measures real results, detects underperformance, re-optimizes, and iterates — the way a real marketing team does weekly standups and retrospectives, except it does it 24/7.
+
+### Phase 6: Dashboard, API + Multi-tenancy (Weeks 27-34)
+
+**The phase that turns the engine into a product.** Everything before this serves a single user via CLI. This phase adds a web interface, programmatic API, and multi-tenant support.
+
+| Week | Task | Details |
+|---|---|---|
+| 27 | **PostgreSQL migration** | Replace file-based workspace with PostgreSQL for production durability. Tasks, outputs, reviews, learnings, goals — all in structured tables. Keep file workspace as local dev mode. |
+| 27 | **REST API — core endpoints** | `POST /goals` (submit goal), `GET /goals/:id` (status + result), `GET /tasks` (active task queue), `GET /pipelines` (running pipelines), `GET /health` (system health). JWT auth. |
+| 28 | **REST API — agent and output endpoints** | `GET /agents` (26 agents with status), `GET /outputs/:taskId` (agent output), `POST /review/:taskId` (human approve/reject), `GET /metrics` (cost, quality, throughput). |
+| 28 | **WebSocket real-time updates** | Live streaming: task status changes, pipeline progress, agent execution logs. Dashboard subscribes for real-time updates. |
+| 29 | **Web dashboard — goal management** | Submit goals via web form. View goal progress (phases, tasks, timeline). Cancel or modify running goals. View completed goals with results. |
+| 29 | **Web dashboard — pipeline monitor** | View running pipelines with step-by-step progress. View agent outputs inline. See review decisions and revision history. |
+| 30 | **Web dashboard — analytics overview** | Cost tracking dashboard (daily/weekly/monthly spend). Quality metrics (approval rates, revision counts). Throughput (tasks completed per day). Budget utilization and forecasting. |
+| 30 | **Web dashboard — escalation center** | Pending approvals (human-in-the-loop decisions). Side-by-side output comparison (agent output vs. revision request). One-click approve/reject/request-changes. |
+| 31 | **MCP integration manager** | Web UI for connecting external tools: enter API keys, authorize OAuth flows (GA4, Google Ads, Meta), test connections, view sync status. Credentials stored encrypted in DB. |
+| 31 | **Product context editor** | Web-based editor for product-marketing-context.md. Guided wizard for first-time setup. Version history. Changes propagate to all agents immediately. |
+| 32 | **Authentication + authorization** | Email/password + OAuth (Google, GitHub). Role-based access: admin (full), marketer (goals + review), viewer (read-only). API key management for programmatic access. |
+| 32 | **Multi-tenancy** | Per-tenant: product context, goals, outputs, connected tools, budget limits. Tenant isolation at database level. Shared infrastructure (agents, Claude API). |
+| 33 | **Billing + usage tracking** | Stripe billing integration. Plans: Free (limited goals/month), Pro (unlimited goals, basic integrations), Enterprise (all integrations, priority execution, custom agents). Usage-based pricing on API calls. |
+| 33 | **Onboarding flow** | New user: create account → run product-marketing-context wizard → connect first integration (GA4 recommended) → submit first goal → see results. Target: 15-minute time-to-value. |
+| 34 | **Production deployment** | Railway deployment with auto-scaling. Managed PostgreSQL + Redis. CDN for dashboard. SSL. Monitoring (Sentry for errors, Uptime Robot for availability). |
+| 34 | **CI/CD pipeline** | GitHub Actions: lint → type-check → test (1472+ tests) → build → deploy to staging → smoke test → deploy to production. Rollback on failure. |
+
+**Deliverable:** A commercial SaaS product. Users sign up, connect their tools, submit goals, and watch a marketing team work. Self-serve, multi-tenant, with billing.
+
+### Resource Requirements
+
+| Phase | Duration | People | Monthly Cost |
+|---|---|---|---|
+| Phase 1 (Director + Engine) | Weeks 1-4 | 1-2 developers | $500-1K (Claude API) | ✓ Complete |
+| Phase 2 (24/7 Runtime) | Weeks 5-8 | 1-2 developers | $1K-2K (API + Redis) | ✓ Complete |
+| Phase 3 (Semantic Review) | Weeks 9-12 | 1-2 developers | $2K-3K (API — more Claude calls for review) |
+| Phase 4 (Tool Integration) | Weeks 13-20 | 2-3 developers | $3K-8K (API + hosting + external tool subscriptions) |
+| Phase 5 (Feedback Loops) | Weeks 21-26 | 2-3 developers + 1 marketer | $5K-10K (API + all integrations running) |
+| Phase 6 (Dashboard + SaaS) | Weeks 27-34 | 3-4 developers + 1 designer | $10K-25K (full stack + infrastructure) |
+
+### User's External Tool Requirements by Phase
+
+What the user needs to provide (accounts/API keys) at each phase:
+
+| Phase | Required from User | Optional |
+|---|---|---|
+| Phase 1-2 | `ANTHROPIC_API_KEY`, Redis (Docker) | — |
+| Phase 3 | Same as above | — |
+| Phase 4a | GA4 account, Search Console access | Mixpanel/PostHog account |
+| Phase 4b | CMS account (WordPress or Webflow) | GitHub repo access |
+| Phase 4c | Email platform account (Mailchimp, Customer.io, or Resend) | — |
+| Phase 4d | Google Ads account, Stripe account | Meta Ads, LinkedIn Ads, social media accounts |
+| Phase 5 | All Phase 4 tools actively running | SEO tool (Ahrefs/SEMrush) |
+| Phase 6 | Nothing new — SaaS manages its own infra | Custom domain for dashboard |
 
 ---
 
@@ -1035,4 +1254,4 @@ MEASURE produces for ALL (feedback):
 
 ---
 
-*This proposal defines the blueprint for a 24/7 autonomous marketing team powered by 26 specialized Claude agents, coordinated by a Marketing Director agent, and connected to external platforms via MCP servers.*
+*This proposal defines the blueprint for a 24/7 autonomous marketing team powered by 26 specialized Claude agents, coordinated by a Marketing Director agent, connected to 30+ external platforms via MCP servers, and capable of executing — not just advising — across the full marketing stack. 6 phases, 34 weeks, from orchestration engine to commercial SaaS product.*
