@@ -48,8 +48,8 @@ describe("Application interface contract", () => {
     expect(mockApp.shutdown).toBeFunction();
   });
 
-  it("start() delegates to queueManager.start()", async () => {
-    let startCalled = false;
+  it("start() delegates to queueManager.start() and scheduler.start()", async () => {
+    const calls: string[] = [];
     const config = makeTestConfig();
 
     const mockApp: Application = {
@@ -61,24 +61,29 @@ describe("Application interface contract", () => {
       pipelineEngine: {} as any,
       queueManager: {
         start: async () => {
-          startCalled = true;
+          calls.push("queueManager.start");
         },
       } as any,
       costTracker: {} as any,
       logger: { info: () => {}, debug: () => {}, warn: () => {}, error: () => {} } as any,
       eventBus: {} as any,
-      scheduler: {} as any,
+      scheduler: {
+        start: async () => {
+          calls.push("scheduler.start");
+        },
+      } as any,
       async start() {
         await this.queueManager.start();
+        await (this.scheduler as any).start();
       },
       async shutdown() {},
     };
 
     await mockApp.start();
-    expect(startCalled).toBe(true);
+    expect(calls).toEqual(["queueManager.start", "scheduler.start"]);
   });
 
-  it("shutdown() calls queueManager.stop() and redis.close()", async () => {
+  it("shutdown() stops scheduler before queueManager, then closes redis", async () => {
     const calls: string[] = [];
     const config = makeTestConfig();
 
@@ -103,16 +108,21 @@ describe("Application interface contract", () => {
       costTracker: {} as any,
       logger: { info: () => {}, debug: () => {}, warn: () => {}, error: () => {} } as any,
       eventBus: {} as any,
-      scheduler: {} as any,
+      scheduler: {
+        stop: async () => {
+          calls.push("scheduler.stop");
+        },
+      } as any,
       async start() {},
       async shutdown() {
+        await (this.scheduler as any).stop();
         await (this.queueManager as any).stop();
         await mockRedis.close();
       },
     };
 
     await mockApp.shutdown();
-    expect(calls).toEqual(["queueManager.stop", "redis.close"]);
+    expect(calls).toEqual(["scheduler.stop", "queueManager.stop", "redis.close"]);
   });
 
   it("shutdown() is idempotent (double call is safe)", async () => {

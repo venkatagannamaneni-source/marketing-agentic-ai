@@ -80,10 +80,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
   logger.info("Workspace initialized", { rootDir: config.workspace.rootDir });
 
   // 3. Claude client (Anthropic SDK auto-reads ANTHROPIC_API_KEY from env)
-  const client = new AnthropicClaudeClient(
-    undefined,
-    logger.child({ module: "claude-client" }),
-  );
+  const client = new AnthropicClaudeClient(undefined, logger);
 
   // 4. Executor config
   const executorConfig: ExecutorConfig = {
@@ -96,12 +93,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
   };
 
   // 5. Agent Executor
-  const executor = new AgentExecutor(
-    client,
-    workspace,
-    executorConfig,
-    logger.child({ module: "executor" }),
-  );
+  const executor = new AgentExecutor(client, workspace, executorConfig, logger);
 
   // 6. Cost Tracker (replaces closure-based budgetProvider)
   const costTracker = new CostTracker({
@@ -127,7 +119,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     client,
     executorConfig,
     undefined,
-    logger.child({ module: "director" }),
+    logger,
   );
 
   // 8. Pipeline Engine
@@ -136,7 +128,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     pipelineFactory,
     executor,
     workspace,
-    logger.child({ module: "pipeline" }),
+    logger,
   );
 
   // 9. Redis connection (lazy connect — no TCP until first operation)
@@ -151,11 +143,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
   logger.info("Redis connection created (lazy — will connect on first use)");
 
   // 10. Worker processor
-  const completionRouter = new CompletionRouter(
-    workspace,
-    director,
-    logger.child({ module: "completion-router" }),
-  );
+  const completionRouter = new CompletionRouter(workspace, director, logger);
   const failureTracker = new FailureTracker();
   const processor = createWorkerProcessor({
     workspace,
@@ -163,7 +151,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     budgetProvider: () => costTracker.toBudgetState(),
     failureTracker,
     completionRouter,
-    logger: logger.child({ module: "worker-processor" }),
+    logger,
   });
 
   // 11. BullMQ adapters (real queue and worker)
@@ -196,14 +184,14 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
       maxParallelAgents: config.maxParallelAgents,
       fallbackDir: `${config.workspace.rootDir}/queue-fallback`,
     },
-    logger: logger.child({ module: "queue-manager" }),
+    logger,
   });
 
   // 13. EventBus
   const eventBus = new EventBus(DEFAULT_EVENT_MAPPINGS, {
     director,
     queueManager,
-    logger: logger.child({ module: "event-bus" }),
+    logger,
   });
 
   // 14. Scheduler

@@ -558,8 +558,12 @@ export class SequentialPipelineEngine {
     run.status = status;
     try {
       config.onStatusChange?.(run);
-    } catch {
-      // Best-effort: don't let callback errors break the pipeline
+    } catch (err: unknown) {
+      this.logger.warn("pipeline_callback_error", {
+        callback: "onStatusChange",
+        runId: run.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -569,8 +573,12 @@ export class SequentialPipelineEngine {
   ): void {
     try {
       config.onStepComplete?.(stepResult);
-    } catch {
-      // Best-effort: don't let callback errors break the pipeline
+    } catch (err: unknown) {
+      this.logger.warn("pipeline_callback_error", {
+        callback: "onStepComplete",
+        stepIndex: stepResult.stepIndex,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

@@ -70,7 +70,7 @@ export class TaskQueueManager {
     this.budgetGate = new BudgetGate();
     this.failureTracker = new FailureTracker();
     this.fallbackQueue = new FallbackQueue(this.config.fallbackDir);
-    this.completionRouter = new CompletionRouter(deps.workspace, deps.director);
+    this.completionRouter = new CompletionRouter(deps.workspace, deps.director, this.logger);
 
     this.wireWorkerEvents();
   }
@@ -144,7 +144,7 @@ export class TaskQueueManager {
         const message = result.reason instanceof Error
           ? result.reason.message
           : String(result.reason);
-        // Best-effort: log but don't fail the batch
+        this.logger.error("queue_batch_enqueue_failed", { taskId, error: message });
         try {
           await this.workspace.appendLearning({
             timestamp: new Date().toISOString(),
@@ -501,6 +501,10 @@ export class TaskQueueManager {
         });
       } catch {
         // Redis went down again — re-enqueue this job and all remaining
+        this.logger.warn("queue_fallback_drain_redis_down", {
+          processedCount: i,
+          remainingCount: jobs.length - i,
+        });
         failedIndex = i;
         break;
       }
