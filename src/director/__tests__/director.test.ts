@@ -713,7 +713,7 @@ describe("MarketingDirector with SkillRegistry", () => {
     // Dynamic prompt reflects registry, not the hardcoded 26/5
     expect(prompt).toContain("8 specialized marketing AI agents");
     expect(prompt).toContain("5 squads");
-    expect(prompt).toContain("### Custom-convert Squad");
+    expect(prompt).toContain("### Custom-convert Squad (custom convert squad)");
     expect(prompt).toContain("- page-cro: Page CRO");
     expect(prompt).toContain("- copywriting: Copy");
     // Should NOT contain hardcoded "26" count

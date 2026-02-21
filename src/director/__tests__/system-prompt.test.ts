@@ -85,6 +85,21 @@ describe("buildDirectorPrompt", () => {
     expect(prompt).toContain("### Beta Squad (second squad)");
   });
 
+  it("lowercases first character of squad description in parenthetical", () => {
+    const uppercaseData: SkillRegistryData = {
+      squads: { dev: { description: "Builds software" } },
+      foundation_skill: "ctx",
+      skills: {
+        ctx: { squad: null, description: "Context", downstream: "all" },
+        "coder": { squad: "dev", description: "Writes code", downstream: [] },
+      },
+    };
+    const registry = SkillRegistry.fromData(uppercaseData);
+    const prompt = buildDirectorPrompt(registry);
+    // "Builds" in YAML becomes "builds" in the parenthetical
+    expect(prompt).toContain("### Dev Squad (builds software)");
+  });
+
   it("lists all skills per squad with descriptions", () => {
     const registry = SkillRegistry.fromData(TWO_SQUAD_DATA);
     const prompt = buildDirectorPrompt(registry);
@@ -140,7 +155,7 @@ describe("buildDirectorPrompt", () => {
     const registry = SkillRegistry.fromData(MINIMAL_DATA);
     const prompt = buildDirectorPrompt(registry);
     expect(prompt).toContain("### Ops Squad (handles operations)");
-    expect(prompt).toContain("1 squads");
+    expect(prompt).toContain("1 squad");
   });
 });
 

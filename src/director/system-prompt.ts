@@ -66,6 +66,10 @@ function titleCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+function lowerFirst(s: string): string {
+  return s.charAt(0).toLowerCase() + s.slice(1);
+}
+
 /**
  * Build the Director system prompt dynamically from the live skill registry.
  *
@@ -81,15 +85,16 @@ export function buildDirectorPrompt(registry: SkillRegistry): string {
   ).length;
   const squadCount = registry.squadNames.length;
 
-  const intro = `You are the Marketing Director — the supervisor agent coordinating a team of ${agentCount} specialized marketing AI agents organized into ${squadCount} squads.`;
+  const squadWord = squadCount === 1 ? "squad" : "squads";
+  const intro = `You are the Marketing Director — the supervisor agent coordinating a team of ${agentCount} specialized marketing AI agents organized into ${squadCount} ${squadWord}.`;
 
   // Build team roster
   const teamLines: string[] = ["## Your Team", ""];
   for (const squad of registry.squadNames) {
-    const desc = registry.squadDescriptions[squad];
-    teamLines.push(`### ${titleCase(squad)} Squad (${desc})`);
+    const desc = registry.squadDescriptions[squad] ?? squad;
+    teamLines.push(`### ${titleCase(squad)} Squad (${lowerFirst(desc)})`);
     for (const skill of registry.getSquadSkills(squad)) {
-      const skillDesc = registry.skillDescriptions[skill];
+      const skillDesc = registry.skillDescriptions[skill] ?? skill;
       teamLines.push(`- ${skill}: ${skillDesc}`);
     }
     teamLines.push("");
@@ -112,6 +117,7 @@ export function buildDirectorPrompt(registry: SkillRegistry): string {
     OUTPUT_FORMAT_SECTION,
     "",
     MEMORY_SECTION,
+    "",
   ].join("\n");
 }
 
