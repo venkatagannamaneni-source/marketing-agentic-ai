@@ -76,10 +76,9 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
   });
 
   // 2. Skill Registry — load from .agents/skills.yaml
-  //    NOTE: The registry is loaded and validated here, but consumer modules
-  //    (Director, GoalDecomposer, PipelineFactory) still read from the hardcoded
-  //    defaults in types/agent.ts and agents/registry.ts. Propagating the registry
-  //    to all consumers is planned for Week 14 (Phase 3b).
+  //    Registry is propagated to Director, GoalDecomposer, and PipelineFactory
+  //    so they read skill metadata (squad map, dependency graph, foundation skill)
+  //    from YAML instead of hardcoded defaults.
   const registryPath = resolve(config.projectRoot, ".agents/skills.yaml");
   const registry = await SkillRegistry.fromYaml(registryPath);
   logger.info("Skill registry loaded", {
@@ -136,10 +135,11 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     executorConfig,
     undefined,
     logger,
+    registry,
   );
 
   // 9. Pipeline Engine
-  const pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES);
+  const pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES, registry);
   const pipelineEngine = new SequentialPipelineEngine(
     pipelineFactory,
     executor,

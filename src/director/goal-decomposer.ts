@@ -1,6 +1,7 @@
 import type { SkillName } from "../types/agent.ts";
 import type { PipelineTemplate } from "../agents/registry.ts";
 import { AGENT_DEPENDENCY_GRAPH } from "../agents/registry.ts";
+import type { SkillRegistry } from "../agents/skill-registry.ts";
 import type {
   Goal,
   GoalCategory,
@@ -61,13 +62,14 @@ const CATEGORY_PHASE_NAMES: Record<GoalCategory, readonly PhaseBlueprint[]> = {
 // ── Goal Decomposer ──────────────────────────────────────────────────────────
 
 export class GoalDecomposer {
+  private readonly dependencyGraph: Record<SkillName, readonly SkillName[]>;
+
   constructor(
     private readonly templates: readonly PipelineTemplate[],
-    private readonly dependencyGraph: Record<
-      SkillName,
-      readonly SkillName[]
-    > = AGENT_DEPENDENCY_GRAPH,
-  ) {}
+    registry?: SkillRegistry,
+  ) {
+    this.dependencyGraph = registry?.dependencyGraph ?? AGENT_DEPENDENCY_GRAPH;
+  }
 
   /**
    * Decompose a goal into a phased plan.

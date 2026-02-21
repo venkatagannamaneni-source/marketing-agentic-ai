@@ -1,7 +1,11 @@
+import { mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import { MarketingDirector, generateGoalId } from "../director.ts";
 import { DIRECTOR_SYSTEM_PROMPT } from "../system-prompt.ts";
 import { SKILL_NAMES, SQUAD_NAMES } from "../../types/agent.ts";
+import { SkillRegistry } from "../../agents/skill-registry.ts";
+import type { SkillRegistryData } from "../../agents/skill-registry.ts";
 import { GOAL_CATEGORIES } from "../types.ts";
 import type { GoalCategory } from "../types.ts";
 import {
@@ -569,5 +573,148 @@ describe("MarketingDirector", () => {
       // Should have no learnings (cold-email is not in optimization routing)
       expect(goal.metadata.relevantLearnings).toBeUndefined();
     });
+  });
+});
+
+// ── MarketingDirector with SkillRegistry ──────────────────────────────────────
+
+describe("MarketingDirector with SkillRegistry", () => {
+  // Registry where page-cro is in squad "custom-convert" instead of "convert"
+  const registryData: SkillRegistryData = {
+    squads: {
+      "custom-convert": { description: "Custom convert squad" },
+      creative: { description: "Creative squad" },
+      strategy: { description: "Strategy squad" },
+      activate: { description: "Activate squad" },
+      measure: { description: "Measure squad" },
+    },
+    foundation_skill: "product-marketing-context",
+    skills: {
+      "product-marketing-context": {
+        squad: null,
+        description: "Foundation",
+        downstream: "all",
+      },
+      "page-cro": {
+        squad: "custom-convert",
+        description: "Page CRO",
+        downstream: [],
+      },
+      "copywriting": {
+        squad: "creative",
+        description: "Copy",
+        downstream: ["page-cro"],
+      },
+      "content-strategy": {
+        squad: "strategy",
+        description: "Strategy",
+        downstream: ["copywriting"],
+      },
+      "analytics-tracking": {
+        squad: "measure",
+        description: "Tracking",
+        downstream: [],
+      },
+      "ab-test-setup": {
+        squad: "measure",
+        description: "A/B Tests",
+        downstream: [],
+      },
+      "seo-audit": {
+        squad: "measure",
+        description: "SEO Audit",
+        downstream: [],
+      },
+      "onboarding-cro": {
+        squad: "activate",
+        description: "Onboarding",
+        downstream: [],
+      },
+      "email-sequence": {
+        squad: "activate",
+        description: "Email",
+        downstream: [],
+      },
+    },
+  };
+
+  const registry = SkillRegistry.fromData(registryData);
+
+  let twReg: TestWorkspace;
+  let directorWithRegistry: MarketingDirector;
+
+  beforeEach(async () => {
+    twReg = await createTestWorkspace();
+    directorWithRegistry = new MarketingDirector(
+      twReg.workspace,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      registry,
+    );
+  });
+
+  afterEach(async () => {
+    await twReg.cleanup();
+  });
+
+  it("resolves output path using registry skillSquadMap in review", async () => {
+    // Create a task targeting page-cro
+    const task = createTestTask({
+      to: "page-cro",
+      status: "completed",
+      next: { type: "director_review" },
+    });
+    await twReg.workspace.writeTask(task);
+
+    // Create the custom squad output directory (workspace.init() only creates
+    // hardcoded squad dirs; registry-driven dirs need explicit creation)
+    await mkdir(resolve(twReg.tempDir, "outputs", "custom-convert", "page-cro"), {
+      recursive: true,
+    });
+
+    // Write output at the registry-driven path (custom-convert squad)
+    await twReg.workspace.writeOutput(
+      "custom-convert",
+      "page-cro",
+      task.id,
+      createTestOutput(),
+    );
+
+    // Review should succeed — output found via registry's squad map
+    const decision = await directorWithRegistry.reviewCompletedTask(task.id);
+    expect(decision.review!.verdict).toBe("APPROVE");
+    expect(decision.action).toBe("goal_complete");
+  });
+
+  it("propagates registry to pipeline factory for task creation", async () => {
+    const result = await directorWithRegistry.startPipeline(
+      "Content Production",
+      "Weekly blog",
+    );
+    // First step is content-strategy → squad should be "strategy" from registry
+    expect(result.tasks[0]!.output.path).toContain("outputs/strategy/content-strategy/");
+  });
+
+  it("still creates goals normally with registry", async () => {
+    const goal = await directorWithRegistry.createGoal(
+      "Test with registry",
+      "content",
+    );
+    expect(goal.id).toStartWith("goal-");
+    expect(goal.description).toBe("Test with registry");
+    expect(goal.category).toBe("content");
+  });
+
+  it("decomposeGoal still works with registry", async () => {
+    const goal = await directorWithRegistry.createGoal(
+      "Build content pipeline",
+      "content",
+    );
+    const plan = directorWithRegistry.decomposeGoal(goal);
+    expect(plan.pipelineTemplateName).toBe("Content Production");
+    expect(plan.phases.length).toBeGreaterThan(0);
   });
 });

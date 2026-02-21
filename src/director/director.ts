@@ -7,6 +7,7 @@ import type { Priority, Task } from "../types/task.ts";
 import type { Review } from "../types/review.ts";
 import type { PipelineDefinition, PipelineRun } from "../types/pipeline.ts";
 import { PIPELINE_TEMPLATES } from "../agents/registry.ts";
+import type { SkillRegistry } from "../agents/skill-registry.ts";
 import type {
   Goal,
   GoalCategory,
@@ -56,6 +57,8 @@ export class MarketingDirector {
   private readonly executorConfig?: ExecutorConfig;
   private readonly executor?: AgentExecutor;
   private readonly humanReviewManager?: HumanReviewManager;
+  private readonly skillSquadMap: Record<string, string | null>;
+  private readonly foundationSkill: string;
 
   constructor(
     private readonly workspace: WorkspaceManager,
@@ -64,6 +67,7 @@ export class MarketingDirector {
     executorConfig?: ExecutorConfig,
     humanReviewManager?: HumanReviewManager,
     logger?: Logger,
+    registry?: SkillRegistry,
   ) {
     this.config = { ...DEFAULT_DIRECTOR_CONFIG, ...config };
     this.logger = (logger ?? NULL_LOGGER).child({ module: "director" });
@@ -73,8 +77,10 @@ export class MarketingDirector {
       this.executor = new AgentExecutor(client, workspace, executorConfig, this.logger);
     }
     this.humanReviewManager = humanReviewManager;
-    this.goalDecomposer = new GoalDecomposer(PIPELINE_TEMPLATES);
-    this.pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES);
+    this.skillSquadMap = registry?.skillSquadMap ?? SKILL_SQUAD_MAP;
+    this.foundationSkill = registry?.foundationSkill ?? FOUNDATION_SKILL;
+    this.goalDecomposer = new GoalDecomposer(PIPELINE_TEMPLATES, registry);
+    this.pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES, registry);
     this.reviewEngine = new ReviewEngine(this.config, client);
     this.escalationEngine = new EscalationEngine(this.config);
   }
@@ -244,14 +250,14 @@ export class MarketingDirector {
     // Read the output — handle foundation skill's different output path
     let outputContent = "";
     try {
-      const squad = SKILL_SQUAD_MAP[task.to];
+      const squad = this.skillSquadMap[task.to];
       if (squad) {
         outputContent = await this.workspace.readOutput(
           squad,
           task.to,
           taskId,
         );
-      } else if (task.to === FOUNDATION_SKILL) {
+      } else if (task.to === this.foundationSkill) {
         outputContent = await this.workspace.readFile(
           "context/product-marketing-context.md",
         );
