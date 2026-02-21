@@ -16,12 +16,49 @@ export interface ClaudeMessageParams {
   readonly maxTokens: number;
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
+  readonly tools?: readonly ClaudeToolDef[];
+}
+
+export interface ClaudeToolDef {
+  readonly name: string;
+  readonly description?: string;
+  readonly input_schema: {
+    readonly type: "object";
+    readonly properties?: unknown | null;
+    readonly required?: readonly string[] | null;
+  };
 }
 
 export interface ClaudeMessage {
   readonly role: "user" | "assistant";
-  readonly content: string;
+  readonly content: string | readonly ClaudeContentBlock[];
 }
+
+// ── Content Block Types (for tool_use conversations) ────────────────────────
+
+export interface ClaudeTextBlock {
+  readonly type: "text";
+  readonly text: string;
+}
+
+export interface ClaudeToolUseBlock {
+  readonly type: "tool_use";
+  readonly id: string;
+  readonly name: string;
+  readonly input: Record<string, unknown>;
+}
+
+export interface ClaudeToolResultBlock {
+  readonly type: "tool_result";
+  readonly tool_use_id: string;
+  readonly content: string;
+  readonly is_error?: boolean;
+}
+
+export type ClaudeContentBlock =
+  | ClaudeTextBlock
+  | ClaudeToolUseBlock
+  | ClaudeToolResultBlock;
 
 export interface ClaudeMessageResult {
   readonly content: string;
@@ -30,6 +67,8 @@ export interface ClaudeMessageResult {
   readonly outputTokens: number;
   readonly stopReason: string;
   readonly durationMs: number;
+  readonly toolUseBlocks?: readonly ClaudeToolUseBlock[];
+  readonly contentBlocks?: readonly ClaudeContentBlock[];
 }
 
 // ── Error ────────────────────────────────────────────────────────────────────
@@ -54,6 +93,9 @@ export type ExecutionErrorCode =
   | "WORKSPACE_WRITE_FAILED"
   // Cancellation
   | "ABORTED"
+  // Tool invocation
+  | "TOOL_ERROR"
+  | "TOOL_LOOP_LIMIT"
   // Catch-all
   | "UNKNOWN";
 
@@ -137,8 +179,37 @@ export class AnthropicClaudeClient implements ClaudeClient {
     const response = await this.callWithRetry(params);
     const durationMs = Date.now() - startTime;
 
-    const textBlock = response.content.find((b) => b.type === "text");
-    const content = textBlock?.type === "text" ? textBlock.text : "";
+    // Extract text content
+    const textBlocks = response.content.filter((b) => b.type === "text");
+    const content = textBlocks
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("");
+
+    // Extract tool_use blocks
+    const toolUseBlocks: ClaudeToolUseBlock[] = response.content
+      .filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
+      .map((b) => ({
+        type: "tool_use" as const,
+        id: b.id,
+        name: b.name,
+        input: b.input as Record<string, unknown>,
+      }));
+
+    // Build content blocks (text + tool_use only — excludes tool_result which is user-side)
+    const contentBlocks: ClaudeContentBlock[] = response.content
+      .filter((b) => b.type === "text" || b.type === "tool_use")
+      .map((b) => {
+        if (b.type === "text") {
+          return { type: "text" as const, text: b.text };
+        }
+        const tu = b as Anthropic.ToolUseBlock;
+        return {
+          type: "tool_use" as const,
+          id: tu.id,
+          name: tu.name,
+          input: tu.input as Record<string, unknown>,
+        };
+      });
 
     this.logger.info("claude_request_completed", {
       model: response.model,
@@ -146,6 +217,7 @@ export class AnthropicClaudeClient implements ClaudeClient {
       outputTokens: response.usage.output_tokens,
       durationMs,
       stopReason: response.stop_reason ?? "unknown",
+      toolUseCount: toolUseBlocks.length,
     });
 
     return {
@@ -155,6 +227,8 @@ export class AnthropicClaudeClient implements ClaudeClient {
       outputTokens: response.usage.output_tokens,
       stopReason: response.stop_reason ?? "unknown",
       durationMs,
+      toolUseBlocks,
+      contentBlocks,
     };
   }
 
@@ -179,9 +253,18 @@ export class AnthropicClaudeClient implements ClaudeClient {
             system: params.system,
             messages: params.messages.map((m) => ({
               role: m.role,
-              content: m.content,
+              content: m.content as string | Anthropic.MessageParam["content"],
             })),
             max_tokens: params.maxTokens,
+            ...(params.tools && params.tools.length > 0
+              ? {
+                  tools: params.tools.map((t) => ({
+                    name: t.name,
+                    description: t.description,
+                    input_schema: t.input_schema as Anthropic.Tool.InputSchema,
+                  })),
+                }
+              : {}),
           },
           {
             timeout: params.timeoutMs,

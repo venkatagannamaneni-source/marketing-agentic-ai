@@ -16,6 +16,7 @@ import { SequentialPipelineEngine } from "./pipeline/pipeline-engine.ts";
 import { PipelineFactory } from "./director/pipeline-factory.ts";
 import { PIPELINE_TEMPLATES } from "./agents/registry.ts";
 import { SkillRegistry } from "./agents/skill-registry.ts";
+import { ToolRegistry, ToolRegistryError } from "./agents/tool-registry.ts";
 import { TaskQueueManager } from "./queue/task-queue.ts";
 import { createRedisConnection } from "./queue/redis-connection.ts";
 import type { RedisConnectionManager } from "./queue/redis-connection.ts";
@@ -36,6 +37,7 @@ import { DEFAULT_SCHEDULES } from "./scheduler/default-schedules.ts";
 export interface Application {
   readonly config: RuntimeConfig;
   readonly registry: SkillRegistry;
+  readonly toolRegistry: ToolRegistry;
   readonly workspace: FileSystemWorkspaceManager;
   readonly client: AnthropicClaudeClient;
   readonly director: MarketingDirector;
@@ -87,6 +89,26 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     foundation: registry.foundationSkill,
   });
 
+  // 2b. Tool Registry — load from .agents/tools.yaml (optional)
+  const toolsPath = resolve(config.projectRoot, ".agents/tools.yaml");
+  let toolRegistry: ToolRegistry;
+  try {
+    toolRegistry = await ToolRegistry.fromYaml(toolsPath);
+    logger.info("Tool registry loaded", {
+      tools: toolRegistry.toolNames.length,
+    });
+  } catch (err: unknown) {
+    if (
+      err instanceof ToolRegistryError &&
+      err.errors.some((e) => e.includes("not found"))
+    ) {
+      toolRegistry = ToolRegistry.empty();
+      logger.info("No tools.yaml found, using empty tool registry");
+    } else {
+      throw err;
+    }
+  }
+
   // 3. Workspace
   const workspace = new FileSystemWorkspaceManager({
     rootDir: config.workspace.rootDir,
@@ -108,7 +130,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
   };
 
   // 6. Agent Executor
-  const executor = new AgentExecutor(client, workspace, executorConfig, logger);
+  const executor = new AgentExecutor(client, workspace, executorConfig, logger, toolRegistry);
 
   // 7. Cost Tracker (replaces closure-based budgetProvider)
   const costTracker = new CostTracker({
@@ -225,6 +247,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
   const app: Application = {
     config,
     registry,
+    toolRegistry,
     workspace,
     client,
     director,
