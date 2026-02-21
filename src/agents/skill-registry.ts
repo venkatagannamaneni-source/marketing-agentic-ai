@@ -48,33 +48,36 @@ export class SkillRegistry {
   readonly squadDescriptions: Record<string, string>;
 
   private constructor(data: SkillRegistryData) {
-    this.squadNames = Object.keys(data.squads);
-    this.skillNames = Object.keys(data.skills);
+    this.squadNames = Object.freeze(Object.keys(data.squads));
+    this.skillNames = Object.freeze(Object.keys(data.skills));
     this.foundationSkill = data.foundation_skill;
 
     // Build squad descriptions
-    this.squadDescriptions = {};
+    const descs: Record<string, string> = {};
     for (const [name, squad] of Object.entries(data.squads)) {
-      this.squadDescriptions[name] = squad.description;
+      descs[name] = squad.description;
     }
+    this.squadDescriptions = Object.freeze(descs);
 
     // Build skill → squad map
-    this.skillSquadMap = {};
+    const sqMap: Record<string, string | null> = {};
     for (const [name, skill] of Object.entries(data.skills)) {
-      this.skillSquadMap[name] = skill.squad;
+      sqMap[name] = skill.squad;
     }
+    this.skillSquadMap = Object.freeze(sqMap);
 
     // Build dependency graph (producer → consumers)
-    this.dependencyGraph = {};
+    const graph: Record<string, readonly string[]> = {};
     for (const [name, skill] of Object.entries(data.skills)) {
       if (skill.downstream === "all") {
-        this.dependencyGraph[name] = this.skillNames.filter(
-          (s) => s !== name,
+        graph[name] = Object.freeze(
+          this.skillNames.filter((s) => s !== name),
         );
       } else {
-        this.dependencyGraph[name] = [...skill.downstream];
+        graph[name] = Object.freeze([...skill.downstream]);
       }
     }
+    this.dependencyGraph = Object.freeze(graph);
   }
 
   /**
@@ -82,9 +85,24 @@ export class SkillRegistry {
    * Parses the file, builds the registry, and validates all constraints.
    */
   static async fromYaml(yamlPath: string): Promise<SkillRegistry> {
-    const content = await readFile(yamlPath, "utf-8");
-    const data = parseYaml(content) as SkillRegistryData;
-    const registry = new SkillRegistry(data);
+    let content: string;
+    try {
+      content = await readFile(yamlPath, "utf-8");
+    } catch (err: unknown) {
+      if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new SkillRegistryError(
+          `Skill registry file not found: ${yamlPath}`,
+          [`File not found: ${yamlPath}`],
+        );
+      }
+      throw new SkillRegistryError(
+        `Failed to read skill registry: ${yamlPath}`,
+        [err instanceof Error ? err.message : String(err)],
+      );
+    }
+    const raw = parseYaml(content);
+    SkillRegistry.validateShape(raw);
+    const registry = new SkillRegistry(raw);
     registry.validate();
     return registry;
   }
@@ -145,6 +163,35 @@ export class SkillRegistry {
   // ── Validation ──────────────────────────────────────────────────────────
 
   /**
+   * Validate the raw YAML shape before constructing a registry.
+   * Catches missing/wrong-type top-level keys early with clear errors.
+   */
+  private static validateShape(data: unknown): asserts data is SkillRegistryData {
+    const errors: string[] = [];
+    if (!data || typeof data !== "object") {
+      throw new SkillRegistryError("Invalid YAML: expected an object at root", [
+        "Root must be an object",
+      ]);
+    }
+    const d = data as Record<string, unknown>;
+    if (!d.squads || typeof d.squads !== "object") {
+      errors.push("Missing or invalid 'squads' key (expected an object)");
+    }
+    if (!d.skills || typeof d.skills !== "object") {
+      errors.push("Missing or invalid 'skills' key (expected an object)");
+    }
+    if (typeof d.foundation_skill !== "string") {
+      errors.push("Missing or invalid 'foundation_skill' (expected a string)");
+    }
+    if (errors.length > 0) {
+      throw new SkillRegistryError(
+        `Invalid YAML schema: ${errors.length} error(s)`,
+        errors,
+      );
+    }
+  }
+
+  /**
    * Validate the registry configuration.
    * Throws SkillRegistryError if any constraints are violated.
    */
@@ -178,7 +225,14 @@ export class SkillRegistry {
       }
     }
 
-    // 4. No orphan squads (every squad should have at least one skill)
+    // 4. No self-referencing downstream
+    for (const [name, consumers] of Object.entries(this.dependencyGraph)) {
+      if ((consumers as readonly string[]).includes(name)) {
+        errors.push(`Skill "${name}" lists itself as a downstream consumer`);
+      }
+    }
+
+    // 5. No orphan squads (every squad should have at least one skill)
     for (const squad of this.squadNames) {
       const skills = this.getSquadSkills(squad);
       if (skills.length === 0) {

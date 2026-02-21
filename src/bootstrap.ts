@@ -76,6 +76,10 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
   });
 
   // 2. Skill Registry — load from .agents/skills.yaml
+  //    NOTE: The registry is loaded and validated here, but consumer modules
+  //    (Director, GoalDecomposer, PipelineFactory) still read from the hardcoded
+  //    defaults in types/agent.ts and agents/registry.ts. Propagating the registry
+  //    to all consumers is planned for Week 14 (Phase 3b).
   const registryPath = resolve(config.projectRoot, ".agents/skills.yaml");
   const registry = await SkillRegistry.fromYaml(registryPath);
   logger.info("Skill registry loaded", {
@@ -91,10 +95,10 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
   await workspace.init();
   logger.info("Workspace initialized", { rootDir: config.workspace.rootDir });
 
-  // 3. Claude client (Anthropic SDK auto-reads ANTHROPIC_API_KEY from env)
+  // 4. Claude client (Anthropic SDK auto-reads ANTHROPIC_API_KEY from env)
   const client = new AnthropicClaudeClient(undefined, logger);
 
-  // 4. Executor config
+  // 5. Executor config
   const executorConfig: ExecutorConfig = {
     projectRoot: config.projectRoot,
     defaultModel: "sonnet",
@@ -104,10 +108,10 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     maxContextTokens: 150_000,
   };
 
-  // 5. Agent Executor
+  // 6. Agent Executor
   const executor = new AgentExecutor(client, workspace, executorConfig, logger);
 
-  // 6. Cost Tracker (replaces closure-based budgetProvider)
+  // 7. Cost Tracker (replaces closure-based budgetProvider)
   const costTracker = new CostTracker({
     budget: {
       totalMonthly: config.budget.totalMonthly,
@@ -117,7 +121,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     },
   });
 
-  // 7. Marketing Director
+  // 8. Marketing Director
   const director = new MarketingDirector(
     workspace,
     {
@@ -134,7 +138,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     logger,
   );
 
-  // 8. Pipeline Engine
+  // 9. Pipeline Engine
   const pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES);
   const pipelineEngine = new SequentialPipelineEngine(
     pipelineFactory,
@@ -143,7 +147,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     logger,
   );
 
-  // 9. Redis connection (lazy connect — no TCP until first operation)
+  // 10. Redis connection (lazy connect — no TCP until first operation)
   const redis: RedisConnectionManager = await createRedisConnection({
     host: config.redis.host,
     port: config.redis.port,
@@ -154,7 +158,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
   });
   logger.info("Redis connection created (lazy — will connect on first use)");
 
-  // 10. Worker processor
+  // 11. Worker processor
   const completionRouter = new CompletionRouter(workspace, director, logger);
   const failureTracker = new FailureTracker();
   const processor = createWorkerProcessor({
@@ -166,7 +170,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     logger,
   });
 
-  // 11. BullMQ adapters (real queue and worker)
+  // 12. BullMQ adapters (real queue and worker)
   const redisConnectionOpts = {
     host: config.redis.host,
     port: config.redis.port,
@@ -183,7 +187,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     config.maxParallelAgents,
   );
 
-  // 12. Task Queue Manager
+  // 13. Task Queue Manager
   const queueManager = new TaskQueueManager({
     workspace,
     director,
@@ -199,14 +203,14 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     logger,
   });
 
-  // 13. EventBus (needs child logger here — EventBusLogger interface has no .child())
+  // 14. EventBus (needs child logger here — EventBusLogger interface has no .child())
   const eventBus = new EventBus(DEFAULT_EVENT_MAPPINGS, {
     director,
     queueManager,
     logger: logger.child({ module: "event-bus" }),
   });
 
-  // 14. Scheduler
+  // 15. Scheduler
   const scheduler = new Scheduler({
     director,
     workspace,
@@ -214,10 +218,10 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     budgetProvider: () => costTracker.toBudgetState(),
   });
 
-  // 15. Shutdown guard
+  // 16. Shutdown guard
   let shuttingDown = false;
 
-  // 16. Build Application object
+  // 17. Build Application object
   const app: Application = {
     config,
     registry,
@@ -301,7 +305,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     },
   };
 
-  // 17. Signal handlers for graceful shutdown (with dedup guard)
+  // 18. Signal handlers for graceful shutdown (with dedup guard)
   let signalHandled = false;
   const onSignal = async (signal: string) => {
     if (signalHandled) return;

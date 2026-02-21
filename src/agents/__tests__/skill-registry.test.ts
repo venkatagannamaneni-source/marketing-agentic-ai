@@ -218,6 +218,93 @@ describe("SkillRegistry validation", () => {
   });
 });
 
+// ── Immutability ────────────────────────────────────────────────────────────
+
+describe("SkillRegistry immutability", () => {
+  it("skillSquadMap is frozen", () => {
+    const registry = SkillRegistry.fromData(MINIMAL_DATA);
+    expect(() => {
+      (registry.skillSquadMap as Record<string, string | null>)["new-skill"] = "alpha";
+    }).toThrow();
+  });
+
+  it("dependencyGraph is frozen", () => {
+    const registry = SkillRegistry.fromData(MINIMAL_DATA);
+    expect(() => {
+      (registry.dependencyGraph as Record<string, readonly string[]>)["new-skill"] = [];
+    }).toThrow();
+  });
+
+  it("dependencyGraph entries are frozen", () => {
+    const registry = SkillRegistry.fromData(MINIMAL_DATA);
+    expect(() => {
+      (registry.dependencyGraph["skill-a"] as string[]).push("injected");
+    }).toThrow();
+  });
+
+  it("squadDescriptions is frozen", () => {
+    const registry = SkillRegistry.fromData(MINIMAL_DATA);
+    expect(() => {
+      (registry.squadDescriptions as Record<string, string>)["new"] = "hacked";
+    }).toThrow();
+  });
+});
+
+// ── Self-referencing downstream ─────────────────────────────────────────────
+
+describe("SkillRegistry self-referencing downstream", () => {
+  it("rejects skill that lists itself as downstream", () => {
+    const bad: SkillRegistryData = {
+      squads: { alpha: { description: "A" } },
+      foundation_skill: "f",
+      skills: {
+        f: { squad: null, description: "F", downstream: [] },
+        a: { squad: "alpha", description: "A", downstream: ["a"] },
+      },
+    };
+    expect(() => SkillRegistry.fromData(bad)).toThrow(SkillRegistryError);
+    expect(() => SkillRegistry.fromData(bad)).toThrow(
+      /lists itself as a downstream consumer/,
+    );
+  });
+});
+
+// ── Schema validation ───────────────────────────────────────────────────────
+
+describe("SkillRegistry schema validation", () => {
+  it("rejects YAML with missing skills key", async () => {
+    // fromData bypasses validateShape (only fromYaml uses it), so we test
+    // via a tmp YAML file to exercise the full path
+    const { writeFile, mkdtemp, unlink } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = await mkdtemp(join(tmpdir(), "skill-reg-"));
+    const path = join(dir, "bad.yaml");
+    await writeFile(path, "squads:\n  a: { description: A }\nfoundation_skill: f\n");
+    try {
+      await expect(SkillRegistry.fromYaml(path)).rejects.toThrow(SkillRegistryError);
+      await expect(SkillRegistry.fromYaml(path)).rejects.toThrow(/Invalid YAML schema/);
+    } finally {
+      await unlink(path);
+    }
+  });
+
+  it("rejects YAML with non-object root", async () => {
+    const { writeFile, mkdtemp, unlink } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = await mkdtemp(join(tmpdir(), "skill-reg-"));
+    const path = join(dir, "bad.yaml");
+    await writeFile(path, "just a string\n");
+    try {
+      await expect(SkillRegistry.fromYaml(path)).rejects.toThrow(SkillRegistryError);
+      await expect(SkillRegistry.fromYaml(path)).rejects.toThrow(/expected an object/);
+    } finally {
+      await unlink(path);
+    }
+  });
+});
+
 // ── YAML Loading ─────────────────────────────────────────────────────────────
 
 describe("SkillRegistry.fromYaml", () => {
@@ -251,6 +338,15 @@ describe("SkillRegistry.fromYaml", () => {
     expect(registry.getSquadSkills("convert")).toHaveLength(5);
     expect(registry.getSquadSkills("activate")).toHaveLength(4);
     expect(registry.getSquadSkills("measure")).toHaveLength(3);
+  });
+
+  it("throws SkillRegistryError for missing file", async () => {
+    await expect(
+      SkillRegistry.fromYaml("/nonexistent/path/skills.yaml"),
+    ).rejects.toThrow(SkillRegistryError);
+    await expect(
+      SkillRegistry.fromYaml("/nonexistent/path/skills.yaml"),
+    ).rejects.toThrow(/not found/);
   });
 });
 
