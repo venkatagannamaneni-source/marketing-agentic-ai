@@ -10,8 +10,13 @@ import type { Logger } from "../observability/logger.ts";
 import { loadSkillMeta } from "./skill-loader.ts";
 import { buildAgentPrompt } from "./prompt-builder.ts";
 import { selectModelTier } from "./model-selector.ts";
-import type { ClaudeClient } from "./claude-client.ts";
+import type {
+  ClaudeClient,
+  ClaudeMessage,
+  ClaudeToolResultBlock,
+} from "./claude-client.ts";
 import { MODEL_MAP, estimateCost, ExecutionError } from "./claude-client.ts";
+import type { ToolRegistry } from "./tool-registry.ts";
 
 // ── Executable Statuses ─────────────────────────────────────────────────────
 
@@ -30,6 +35,7 @@ export interface ExecutorConfig {
   readonly defaultMaxTokens: number;
   readonly maxRetries: number;
   readonly maxContextTokens: number;
+  readonly maxToolIterations?: number;
 }
 
 export const DEFAULT_EXECUTOR_CONFIG: Omit<ExecutorConfig, "projectRoot"> = {
@@ -59,6 +65,14 @@ export interface ExecutionResult {
   readonly error?: ExecutionError;
 }
 
+export interface ToolInvocationRecord {
+  readonly qualifiedName: string;
+  readonly params: Record<string, unknown>;
+  readonly success: boolean;
+  readonly isStub: boolean;
+  readonly durationMs: number;
+}
+
 export interface ExecutionMetadata {
   readonly model: string;
   readonly modelTier: ModelTier;
@@ -67,20 +81,24 @@ export interface ExecutionMetadata {
   readonly durationMs: number;
   readonly estimatedCost: number;
   readonly retryCount: number;
+  readonly toolInvocations?: readonly ToolInvocationRecord[];
 }
 
 // ── Agent Executor ───────────────────────────────────────────────────────────
 
 export class AgentExecutor {
   private readonly logger: Logger;
+  private readonly toolRegistry: ToolRegistry | null;
 
   constructor(
     private readonly client: ClaudeClient,
     private readonly workspace: WorkspaceManager,
     private readonly config: ExecutorConfig,
     logger?: Logger,
+    toolRegistry?: ToolRegistry,
   ) {
     this.logger = (logger ?? NULL_LOGGER).child({ module: "executor" });
+    this.toolRegistry = toolRegistry ?? null;
   }
 
   /**
@@ -292,39 +310,166 @@ export class AgentExecutor {
     let inputTokens: number;
     let outputTokens: number;
     let durationMs: number;
+    const toolInvocations: ToolInvocationRecord[] = [];
 
     try {
-      // 7. Call Claude API
+      // 7. Call Claude API (with optional tool loop)
+      const toolDefs = this.toolRegistry?.getToolsForSkill(task.to) ?? [];
+      const maxToolIter = this.config.maxToolIterations ?? 10;
+
       this.logger.debug("executor_api_call_started", {
         taskId: task.id,
         model,
         maxTokens: this.config.defaultMaxTokens,
-      });
-      const result = await this.client.createMessage({
-        model,
-        system: prompt.systemPrompt,
-        messages: [{ role: "user", content: prompt.userMessage }],
-        maxTokens: this.config.defaultMaxTokens,
-        timeoutMs: this.config.defaultTimeoutMs,
-        signal,
+        toolCount: toolDefs.length,
       });
 
-      content = result.content;
-      inputTokens = result.inputTokens;
-      outputTokens = result.outputTokens;
-      durationMs = result.durationMs;
+      // Build initial messages
+      const messages: ClaudeMessage[] = [
+        { role: "user", content: prompt.userMessage },
+      ];
 
-      this.logger.info("executor_api_call_completed", {
-        taskId: task.id,
-        model,
-        inputTokens: result.inputTokens,
-        outputTokens: result.outputTokens,
-        durationMs: result.durationMs,
-        stopReason: result.stopReason,
-      });
+      let finalContent = "";
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      let totalDurationMs = 0;
+      let lastStopReason = "";
+      let iterations = 0;
 
-      // 8. Detect truncation and retry once with format reminder
-      if (result.stopReason !== "end_turn") {
+      while (iterations <= maxToolIter) {
+        // Check abort before each iteration
+        if (signal?.aborted) {
+          await this.safeUpdateStatus(task.id, "failed");
+          return this.failedResult(
+            task,
+            startTime,
+            new ExecutionError(
+              "Aborted during tool loop",
+              "ABORTED",
+              task.id,
+              false,
+            ),
+          );
+        }
+
+        const result = await this.client.createMessage({
+          model,
+          system: prompt.systemPrompt,
+          messages,
+          maxTokens: this.config.defaultMaxTokens,
+          timeoutMs: this.config.defaultTimeoutMs,
+          signal,
+          ...(toolDefs.length > 0 ? { tools: toolDefs } : {}),
+        });
+
+        totalInputTokens += result.inputTokens;
+        totalOutputTokens += result.outputTokens;
+        totalDurationMs += result.durationMs;
+        lastStopReason = result.stopReason;
+
+        const toolUseBlocks = result.toolUseBlocks ?? [];
+
+        if (
+          result.stopReason === "tool_use" &&
+          toolUseBlocks.length > 0 &&
+          this.toolRegistry
+        ) {
+          // Claude wants to use tools — add assistant message with content blocks
+          messages.push({
+            role: "assistant",
+            content: result.contentBlocks ?? [],
+          });
+
+          // Invoke each tool sequentially and build tool_result blocks
+          const toolResultBlocks: ClaudeToolResultBlock[] = [];
+          for (const toolUse of toolUseBlocks) {
+            try {
+              const invocationResult = await this.toolRegistry.invokeTool(
+                toolUse.name,
+                toolUse.input,
+              );
+              toolInvocations.push({
+                qualifiedName: toolUse.name,
+                params: toolUse.input,
+                success: invocationResult.success,
+                isStub: invocationResult.isStub,
+                durationMs: invocationResult.durationMs,
+              });
+              toolResultBlocks.push({
+                type: "tool_result",
+                tool_use_id: toolUse.id,
+                content: invocationResult.content,
+                is_error: !invocationResult.success,
+              });
+            } catch (err: unknown) {
+              // Tool invocation failed — send error result back to Claude
+              toolResultBlocks.push({
+                type: "tool_result",
+                tool_use_id: toolUse.id,
+                content: `Tool invocation error: ${errorMessage(err)}`,
+                is_error: true,
+              });
+              toolInvocations.push({
+                qualifiedName: toolUse.name,
+                params: toolUse.input,
+                success: false,
+                isStub: false,
+                durationMs: 0,
+              });
+            }
+          }
+
+          // Add user message with tool results
+          messages.push({
+            role: "user",
+            content: toolResultBlocks,
+          });
+
+          iterations++;
+          this.logger.debug("executor_tool_loop_iteration", {
+            taskId: task.id,
+            iteration: iterations,
+            toolsCalled: toolUseBlocks.length,
+          });
+          continue;
+        }
+
+        // Not a tool_use stop — we have our final response
+        finalContent = result.content;
+        this.logger.info("executor_api_call_completed", {
+          taskId: task.id,
+          model,
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          durationMs: totalDurationMs,
+          stopReason: lastStopReason,
+          toolIterations: iterations,
+        });
+        break;
+      }
+
+      // Check if we hit the iteration limit
+      if (iterations > maxToolIter) {
+        await this.safeUpdateStatus(task.id, "failed");
+        return this.failedResult(
+          task,
+          startTime,
+          new ExecutionError(
+            `Tool loop exceeded max iterations (${maxToolIter})`,
+            "TOOL_LOOP_LIMIT",
+            task.id,
+            false,
+          ),
+        );
+      }
+
+      content = finalContent;
+      inputTokens = totalInputTokens;
+      outputTokens = totalOutputTokens;
+      durationMs = totalDurationMs;
+
+      // 8. Detect truncation and retry once (only for non-tool conversations)
+      if (lastStopReason !== "end_turn" && iterations === 0) {
         truncated = true;
         this.logger.warn("executor_truncation_detected", {
           taskId: task.id,
@@ -338,7 +483,7 @@ export class AgentExecutor {
             system: prompt.systemPrompt,
             messages: [
               { role: "user", content: prompt.userMessage },
-              { role: "assistant", content: result.content },
+              { role: "assistant", content },
               {
                 role: "user",
                 content:
@@ -351,17 +496,17 @@ export class AgentExecutor {
           });
 
           retryCount = 1;
-          // Use the retry result: if it completed, mark as not truncated;
-          // if also truncated, still prefer the retry (asked for concise output)
           content = retryResult.content;
           if (retryResult.stopReason === "end_turn") {
             truncated = false;
           }
-          // Accumulate tokens from both calls
           inputTokens += retryResult.inputTokens;
           outputTokens += retryResult.outputTokens;
           durationMs += retryResult.durationMs;
         }
+      } else if (lastStopReason !== "end_turn" && iterations > 0) {
+        // Truncated during tool conversation — mark but don't retry
+        truncated = true;
       }
     } catch (err: unknown) {
       await this.safeUpdateStatus(task.id, "failed");
@@ -467,6 +612,7 @@ export class AgentExecutor {
         durationMs,
         estimatedCost: estimatedCostValue,
         retryCount,
+        ...(toolInvocations.length > 0 ? { toolInvocations } : {}),
       },
       truncated,
       missingInputs: prompt.missingInputs,

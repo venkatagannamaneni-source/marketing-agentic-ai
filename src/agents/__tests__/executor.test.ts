@@ -8,6 +8,8 @@ import type {
   ClaudeMessageParams,
   ClaudeMessageResult,
 } from "../claude-client.ts";
+import { ToolRegistry } from "../tool-registry.ts";
+import type { ToolRegistryData } from "../tool-registry.ts";
 import {
   createTestWorkspace,
   type TestWorkspace,
@@ -722,6 +724,307 @@ describe("AgentExecutor", () => {
       expect(result.status).toBe("failed");
       expect(result.error?.taskId).toBe(task.id);
       expect(result.error?.code).toBe("RATE_LIMITED");
+    });
+  });
+
+  // ── Tool Loop Tests ──────────────────────────────────────────────────────
+
+  describe("tool loop", () => {
+    const TOOL_DATA: ToolRegistryData = {
+      tools: {
+        "test-tool": {
+          description: "A test tool",
+          provider: "stub",
+          skills: ["page-cro"],
+          actions: [
+            {
+              name: "analyze",
+              description: "Analyze page",
+              parameters: {
+                type: "object",
+                properties: { url: { type: "string" } },
+                required: ["url"],
+              },
+            },
+          ],
+        },
+      },
+    };
+
+    it("passes tool definitions to Claude when registry has tools for skill", async () => {
+      const toolRegistry = ToolRegistry.fromData(TOOL_DATA);
+      const client = createMockClient();
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+        undefined,
+        toolRegistry,
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+      await executor.execute(task);
+
+      expect(client.calls.length).toBeGreaterThanOrEqual(1);
+      expect(client.calls[0]!.tools).toBeDefined();
+      expect(client.calls[0]!.tools!.length).toBe(1);
+      expect(client.calls[0]!.tools![0]!.name).toBe("test-tool__analyze");
+    });
+
+    it("does not pass tools when registry has no tools for skill", async () => {
+      const toolRegistry = ToolRegistry.fromData({
+        tools: {
+          "other-tool": {
+            description: "Not for page-cro",
+            provider: "stub",
+            skills: ["analytics-tracking"],
+            actions: [
+              {
+                name: "query",
+                description: "Q",
+                parameters: { type: "object" },
+              },
+            ],
+          },
+        },
+      });
+      const client = createMockClient();
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+        undefined,
+        toolRegistry,
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+      await executor.execute(task);
+
+      expect(client.calls[0]!.tools).toBeUndefined();
+    });
+
+    it("handles tool_use stop reason with tool loop", async () => {
+      const toolRegistry = ToolRegistry.fromData(TOOL_DATA);
+      let callCount = 0;
+      const client = createMockClient((_params, callIndex) => {
+        callCount++;
+        if (callIndex === 0) {
+          // First call: Claude requests tool use
+          return {
+            content: "",
+            stopReason: "tool_use",
+            toolUseBlocks: [
+              {
+                type: "tool_use" as const,
+                id: "toolu_123",
+                name: "test-tool__analyze",
+                input: { url: "https://example.com" },
+              },
+            ],
+            contentBlocks: [
+              {
+                type: "tool_use" as const,
+                id: "toolu_123",
+                name: "test-tool__analyze",
+                input: { url: "https://example.com" },
+              },
+            ],
+          };
+        }
+        // Second call: Claude responds with final text
+        return {
+          content: "# Analysis Result\n\nThe page looks great.",
+          stopReason: "end_turn",
+          toolUseBlocks: [],
+          contentBlocks: [
+            {
+              type: "text" as const,
+              text: "# Analysis Result\n\nThe page looks great.",
+            },
+          ],
+        };
+      });
+
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+        undefined,
+        toolRegistry,
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task);
+
+      expect(result.status).toBe("completed");
+      expect(result.content).toContain("Analysis Result");
+      // Should have made 2 API calls
+      expect(callCount).toBe(2);
+      // Second call should include tool result in messages
+      expect(client.calls[1]!.messages.length).toBe(3); // user + assistant(tool_use) + user(tool_result)
+    });
+
+    it("tracks tool invocations in metadata", async () => {
+      const toolRegistry = ToolRegistry.fromData(TOOL_DATA);
+      const client = createMockClient((_params, callIndex) => {
+        if (callIndex === 0) {
+          return {
+            content: "",
+            stopReason: "tool_use",
+            toolUseBlocks: [
+              {
+                type: "tool_use" as const,
+                id: "toolu_456",
+                name: "test-tool__analyze",
+                input: { url: "https://example.com" },
+              },
+            ],
+            contentBlocks: [
+              {
+                type: "tool_use" as const,
+                id: "toolu_456",
+                name: "test-tool__analyze",
+                input: { url: "https://example.com" },
+              },
+            ],
+          };
+        }
+        return {
+          content: "# Result\n\nDone.",
+          stopReason: "end_turn",
+        };
+      });
+
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+        undefined,
+        toolRegistry,
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task);
+
+      expect(result.status).toBe("completed");
+      expect(result.metadata.toolInvocations).toBeDefined();
+      expect(result.metadata.toolInvocations!.length).toBe(1);
+      expect(result.metadata.toolInvocations![0]!.qualifiedName).toBe(
+        "test-tool__analyze",
+      );
+      expect(result.metadata.toolInvocations![0]!.isStub).toBe(true);
+      expect(result.metadata.toolInvocations![0]!.success).toBe(true);
+    });
+
+    it("respects maxToolIterations limit", async () => {
+      const toolRegistry = ToolRegistry.fromData(TOOL_DATA);
+      // Client always returns tool_use — should hit the limit
+      const client = createMockClient(() => ({
+        content: "",
+        stopReason: "tool_use",
+        toolUseBlocks: [
+          {
+            type: "tool_use" as const,
+            id: "toolu_loop",
+            name: "test-tool__analyze",
+            input: { url: "https://example.com" },
+          },
+        ],
+        contentBlocks: [
+          {
+            type: "tool_use" as const,
+            id: "toolu_loop",
+            name: "test-tool__analyze",
+            input: { url: "https://example.com" },
+          },
+        ],
+      }));
+
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig({ maxToolIterations: 3 }),
+        undefined,
+        toolRegistry,
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task);
+
+      expect(result.status).toBe("failed");
+      expect(result.error?.code).toBe("TOOL_LOOP_LIMIT");
+    });
+
+    it("works identically without tool registry (null)", async () => {
+      const client = createMockClient();
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task);
+
+      expect(result.status).toBe("completed");
+      expect(client.calls[0]!.tools).toBeUndefined();
+    });
+
+    it("accumulates tokens from all tool loop iterations", async () => {
+      const toolRegistry = ToolRegistry.fromData(TOOL_DATA);
+      const client = createMockClient((_params, callIndex) => {
+        if (callIndex === 0) {
+          return {
+            content: "",
+            stopReason: "tool_use",
+            inputTokens: 100,
+            outputTokens: 50,
+            toolUseBlocks: [
+              {
+                type: "tool_use" as const,
+                id: "toolu_789",
+                name: "test-tool__analyze",
+                input: { url: "https://example.com" },
+              },
+            ],
+            contentBlocks: [
+              {
+                type: "tool_use" as const,
+                id: "toolu_789",
+                name: "test-tool__analyze",
+                input: { url: "https://example.com" },
+              },
+            ],
+          };
+        }
+        return {
+          content: "# Done\n\nResult.",
+          stopReason: "end_turn",
+          inputTokens: 200,
+          outputTokens: 100,
+        };
+      });
+
+      const executor = new AgentExecutor(
+        client,
+        tw.workspace,
+        createExecutorConfig(),
+        undefined,
+        toolRegistry,
+      );
+      const task = createExecutorTask();
+      await tw.workspace.writeTask(task);
+
+      const result = await executor.execute(task);
+
+      expect(result.status).toBe("completed");
+      // Tokens accumulated from both calls
+      expect(result.metadata.inputTokens).toBe(300);
+      expect(result.metadata.outputTokens).toBe(150);
     });
   });
 });

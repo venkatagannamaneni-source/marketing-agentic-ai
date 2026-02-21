@@ -1,0 +1,25 @@
+# Tool Registry Configuration
+#
+# Declare which external tools agents can access.
+# Each tool is bound to specific skills — only authorized skills can invoke it.
+#
+# To add a tool:
+#   1. Add an entry under `tools:` below
+#   2. Restart the system
+#
+# Example:
+#   ga4:
+#     description: "Google Analytics 4 — read traffic and conversion data"
+#     provider: stub
+#     skills: [analytics-tracking, ab-test-setup]
+#     actions:
+#       - name: query-events
+#         description: "Query GA4 event data"
+#         parameters:
+#           type: object
+#           properties:
+#             start_date: { type: string }
+#             end_date: { type: string }
+#           required: [start_date, end_date]
+
+tools: {}

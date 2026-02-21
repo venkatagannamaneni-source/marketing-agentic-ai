@@ -15,12 +15,28 @@ export {
   type SkillRegistryData,
 } from "./skill-registry.ts";
 
+// ── Tool Registry ─────────────────────────────────────────────────────
+export {
+  ToolRegistry,
+  ToolRegistryError,
+  type ToolRegistryData,
+  type ToolConfigData,
+  type ToolActionData,
+  type ClaudeToolDefinition,
+  type ToolInvocationResult,
+} from "./tool-registry.ts";
+
 // ── Claude Client ───────────────────────────────────────────────────────
 export type {
   ClaudeClient,
   ClaudeMessageParams,
   ClaudeMessage,
   ClaudeMessageResult,
+  ClaudeToolDef,
+  ClaudeTextBlock,
+  ClaudeToolUseBlock,
+  ClaudeToolResultBlock,
+  ClaudeContentBlock,
   ExecutionErrorCode,
 } from "./claude-client.ts";
 export {
@@ -44,5 +60,6 @@ export type {
   ExecutionResult,
   ExecutionMetadata,
   ExecuteOptions,
+  ToolInvocationRecord,
 } from "./executor.ts";
 export { AgentExecutor, DEFAULT_EXECUTOR_CONFIG } from "./executor.ts";
