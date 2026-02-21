@@ -187,11 +187,11 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     logger,
   });
 
-  // 13. EventBus
+  // 13. EventBus (needs child logger here — EventBusLogger interface has no .child())
   const eventBus = new EventBus(DEFAULT_EVENT_MAPPINGS, {
     director,
     queueManager,
-    logger,
+    logger: logger.child({ module: "event-bus" }),
   });
 
   // 14. Scheduler
