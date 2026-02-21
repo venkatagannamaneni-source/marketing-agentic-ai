@@ -45,7 +45,8 @@ Three capabilities make this possible:
 | Agent executor with Claude API | **Done** | Real Anthropic API integration, model selection, prompt building, output parsing |
 | Cost tracking and budget gating | **Done** | 5 budget states (normal → exhausted), per-task cost logging |
 | Semantic review (Claude-powered) | **Not built** | Director uses Claude to judge quality, not just regex patterns |
-| MCP integrations (30+ tools) | **Not built** | Connections to GA4, CMS, email, ads, social, SEO tools, payments |
+| Platform hardening (extensibility layer) | **Not built** | Config-driven skill registry, Tool Registry + `tools.yaml` for user-configured MCP tools, dynamic Director prompt |
+| MCP integrations (user-configurable) | **Not built** | User connects their own tools (GA4, CMS, email, ads, social, SEO, payments) via Tool Registry |
 | Feedback loops | **Not built** | Analytics → optimization → measurement → re-optimization cycles |
 | Web dashboard + API | **Not built** | Web UI for goal management, pipeline monitoring, escalation handling |
 | Multi-tenancy + billing | **Not built** | Auth, per-tenant isolation, Stripe billing |
@@ -601,7 +602,9 @@ This table shows what each agent does **without** tool integrations vs **with** 
 
 ### One-time setup (30 minutes)
 
-The user establishes product context by running `/product-marketing-context`. This creates the team's shared knowledge base covering 12 sections:
+Two things happen during setup:
+
+**1. Product context** — The user runs `/product-marketing-context` to create the team's shared knowledge base covering 12 sections:
 
 1. Product overview — what you sell and how it works
 2. Target audience — who buys and why
@@ -616,6 +619,33 @@ The user establishes product context by running `/product-marketing-context`. Th
 11. Proof points — metrics, testimonials, case studies
 12. Goals — current marketing objectives and targets
 
+**2. Tool connections** — The user configures `tools.yaml` to connect their marketing stack. This is the "onboard a new hire" experience — grant the system access to the tools it needs:
+
+```yaml
+# tools.yaml — user connects their marketing stack
+ga4:
+  mcp_server: "@anthropic/ga4-mcp"
+  credentials_env: GA4_CREDENTIALS
+  skills: [analytics-tracking, ab-test-setup, director]
+
+webflow:
+  mcp_server: "@anthropic/webflow-mcp"
+  credentials_env: WEBFLOW_API_TOKEN
+  skills: [copywriting, page-cro, programmatic-seo]
+
+mailchimp:
+  mcp_server: "@anthropic/mailchimp-mcp"
+  credentials_env: MAILCHIMP_API_KEY
+  skills: [email-sequence, cold-email]
+
+stripe:
+  mcp_server: "@anthropic/stripe-mcp"
+  credentials_env: STRIPE_SECRET_KEY
+  skills: [pricing-strategy, paywall-upgrade-cro, referral-program]
+```
+
+Users only connect the tools they have. The system adapts — agents with connected tools execute directly; agents without connected tools produce advisory output. No tool is required. Every tool is optional.
+
 ### Ongoing input (minimal)
 
 | Input | Frequency | Method |
@@ -624,7 +654,8 @@ The user establishes product context by running `/product-marketing-context`. Th
 | New product features or changes | As needed | Update product-marketing-context.md |
 | Approval of high-stakes outputs | As flagged | Director escalates via Slack/dashboard |
 | Budget and resource constraints | Quarterly | Conversational with Director |
-| Access credentials for integrations | One-time | Environment variables / MCP config |
+| Tool connections | One-time | Configure `tools.yaml` (credentials via env vars, never in config) |
+| New tool access | As needed | Add entry to `tools.yaml` + install MCP server |
 
 ### What the system handles autonomously (no human input needed)
 
@@ -885,18 +916,18 @@ Agents create and manage real ad campaigns and social content. Users connect the
 
 | Week | Task | Details |
 |---|---|---|
-| 21 | **Analytics → Optimization loop** | analytics-tracking reads GA4 weekly. Director compares metrics to goal targets. If conversion rate drops >10%, Director triggers page-cro → copywriting → ab-test-setup pipeline automatically. |
-| 21 | **A/B test → Iteration loop** | ab-test-setup monitors running experiments. When a test reaches statistical significance, Director reads the result, implements the winning variant (via CMS MCP), and logs learnings. Losing variants are analyzed — why did they fail? |
-| 22 | **SEO → Content loop** | seo-audit reads Search Console weekly. Detects ranking drops for target keywords. Director triggers content-strategy (update content plan) → copywriting (refresh underperforming content) → programmatic-seo (build supporting pages). |
-| 22 | **Email performance loop** | email-sequence reads ESP engagement data. Identifies underperforming emails (below benchmark open/click rates). Director triggers revision: cold-email rewrites subject lines, email-sequence adjusts send timing, ab-test-setup designs split tests. |
-| 23 | **Competitive response loop** | competitor-alternatives monitors competitor pages via Playwright (weekly scrapes). Detects: new features launched, pricing changes, new comparison pages targeting us. Director triggers: update comparison pages, adjust ad copy, revise positioning if needed. |
-| 23 | **Ad optimization loop** | paid-ads reads Google/Meta campaign performance. Identifies: high-CPC keywords to pause, winning ad variants to scale, audience segments underperforming. Director adjusts budget allocation and triggers new ad variant creation. |
-| 24 | **Social content optimization loop** | social-content reads engagement metrics per platform. Identifies: best-performing content types, optimal posting times, high-engagement topics. Director adjusts content calendar and content-strategy priorities based on real social data. |
-| 24 | **Compound learning system** | Director aggregates learnings across all loops into a structured knowledge base. Pattern detection: "Short headlines convert 23% better on our landing pages" → applied automatically to all future copywriting tasks. |
-| 25 | **Budget reallocation engine** | Director reads ROI data across channels (ads, email, content, social). Automatically shifts budget from low-ROI channels to high-ROI ones. Reports reallocation decisions and reasoning to learnings. |
-| 25 | **Anomaly detection + alerting** | HealthMonitor watches all connected data sources. Detects anomalies: traffic drops >20%, conversion drops >10%, cost spikes, email deliverability issues. Triggers appropriate response pipeline or escalates to human. |
-| 26 | **Self-healing pipelines** | When a pipeline fails, Director analyzes the failure, adjusts the strategy (simpler task decomposition, different agent assignment, reduced scope), and retries. Up to 3 self-healing attempts before escalation. |
-| 26 | **Integration tests for feedback loops** | End-to-end tests with mock external data: simulate GA4 showing conversion drop → verify system detects it → triggers optimization → produces revised output → "deploys" fix. |
+| 23 | **Analytics → Optimization loop** | analytics-tracking reads GA4 weekly. Director compares metrics to goal targets. If conversion rate drops >10%, Director triggers page-cro → copywriting → ab-test-setup pipeline automatically. |
+| 23 | **A/B test → Iteration loop** | ab-test-setup monitors running experiments. When a test reaches statistical significance, Director reads the result, implements the winning variant (via CMS MCP), and logs learnings. Losing variants are analyzed — why did they fail? |
+| 24 | **SEO → Content loop** | seo-audit reads Search Console weekly. Detects ranking drops for target keywords. Director triggers content-strategy (update content plan) → copywriting (refresh underperforming content) → programmatic-seo (build supporting pages). |
+| 24 | **Email performance loop** | email-sequence reads ESP engagement data. Identifies underperforming emails (below benchmark open/click rates). Director triggers revision: cold-email rewrites subject lines, email-sequence adjusts send timing, ab-test-setup designs split tests. |
+| 25 | **Competitive response loop** | competitor-alternatives monitors competitor pages via Playwright (weekly scrapes). Detects: new features launched, pricing changes, new comparison pages targeting us. Director triggers: update comparison pages, adjust ad copy, revise positioning if needed. |
+| 25 | **Ad optimization loop** | paid-ads reads Google/Meta campaign performance. Identifies: high-CPC keywords to pause, winning ad variants to scale, audience segments underperforming. Director adjusts budget allocation and triggers new ad variant creation. |
+| 26 | **Social content optimization loop** | social-content reads engagement metrics per platform. Identifies: best-performing content types, optimal posting times, high-engagement topics. Director adjusts content calendar and content-strategy priorities based on real social data. |
+| 26 | **Compound learning system** | Director aggregates learnings across all loops into a structured knowledge base. Pattern detection: "Short headlines convert 23% better on our landing pages" → applied automatically to all future copywriting tasks. |
+| 27 | **Budget reallocation engine** | Director reads ROI data across channels (ads, email, content, social). Automatically shifts budget from low-ROI channels to high-ROI ones. Reports reallocation decisions and reasoning to learnings. |
+| 27 | **Anomaly detection + alerting** | HealthMonitor watches all connected data sources. Detects anomalies: traffic drops >20%, conversion drops >10%, cost spikes, email deliverability issues. Triggers appropriate response pipeline or escalates to human. |
+| 28 | **Self-healing pipelines** | When a pipeline fails, Director analyzes the failure, adjusts the strategy (simpler task decomposition, different agent assignment, reduced scope), and retries. Up to 3 self-healing attempts before escalation. |
+| 28 | **Integration tests for feedback loops** | End-to-end tests with mock external data: simulate GA4 showing conversion drop → verify system detects it → triggers optimization → produces revised output → "deploys" fix. |
 
 **Deliverable:** The system improves itself. It measures real results, detects underperformance, re-optimizes, and iterates — the way a real marketing team does weekly standups and retrospectives, except it does it 24/7.
 
@@ -906,22 +937,22 @@ Agents create and manage real ad campaigns and social content. Users connect the
 
 | Week | Task | Details |
 |---|---|---|
-| 27 | **PostgreSQL migration** | Replace file-based workspace with PostgreSQL for production durability. Tasks, outputs, reviews, learnings, goals — all in structured tables. Keep file workspace as local dev mode. |
-| 27 | **REST API — core endpoints** | `POST /goals` (submit goal), `GET /goals/:id` (status + result), `GET /tasks` (active task queue), `GET /pipelines` (running pipelines), `GET /health` (system health). JWT auth. |
-| 28 | **REST API — agent and output endpoints** | `GET /agents` (26 agents with status), `GET /outputs/:taskId` (agent output), `POST /review/:taskId` (human approve/reject), `GET /metrics` (cost, quality, throughput). |
-| 28 | **WebSocket real-time updates** | Live streaming: task status changes, pipeline progress, agent execution logs. Dashboard subscribes for real-time updates. |
-| 29 | **Web dashboard — goal management** | Submit goals via web form. View goal progress (phases, tasks, timeline). Cancel or modify running goals. View completed goals with results. |
-| 29 | **Web dashboard — pipeline monitor** | View running pipelines with step-by-step progress. View agent outputs inline. See review decisions and revision history. |
-| 30 | **Web dashboard — analytics overview** | Cost tracking dashboard (daily/weekly/monthly spend). Quality metrics (approval rates, revision counts). Throughput (tasks completed per day). Budget utilization and forecasting. |
-| 30 | **Web dashboard — escalation center** | Pending approvals (human-in-the-loop decisions). Side-by-side output comparison (agent output vs. revision request). One-click approve/reject/request-changes. |
-| 31 | **MCP integration manager** | Web UI for connecting external tools: enter API keys, authorize OAuth flows (GA4, Google Ads, Meta), test connections, view sync status. Credentials stored encrypted in DB. |
-| 31 | **Product context editor** | Web-based editor for product-marketing-context.md. Guided wizard for first-time setup. Version history. Changes propagate to all agents immediately. |
-| 32 | **Authentication + authorization** | Email/password + OAuth (Google, GitHub). Role-based access: admin (full), marketer (goals + review), viewer (read-only). API key management for programmatic access. |
-| 32 | **Multi-tenancy** | Per-tenant: product context, goals, outputs, connected tools, budget limits. Tenant isolation at database level. Shared infrastructure (agents, Claude API). |
-| 33 | **Billing + usage tracking** | Stripe billing integration. Plans: Free (limited goals/month), Pro (unlimited goals, basic integrations), Enterprise (all integrations, priority execution, custom agents). Usage-based pricing on API calls. |
-| 33 | **Onboarding flow** | New user: create account → run product-marketing-context wizard → connect first integration (GA4 recommended) → submit first goal → see results. Target: 15-minute time-to-value. |
-| 34 | **Production deployment** | Railway deployment with auto-scaling. Managed PostgreSQL + Redis. CDN for dashboard. SSL. Monitoring (Sentry for errors, Uptime Robot for availability). |
-| 34 | **CI/CD pipeline** | GitHub Actions: lint → type-check → test (1472+ tests) → build → deploy to staging → smoke test → deploy to production. Rollback on failure. |
+| 29 | **PostgreSQL migration** | Replace file-based workspace with PostgreSQL for production durability. Tasks, outputs, reviews, learnings, goals — all in structured tables. Keep file workspace as local dev mode. |
+| 29 | **REST API — core endpoints** | `POST /goals` (submit goal), `GET /goals/:id` (status + result), `GET /tasks` (active task queue), `GET /pipelines` (running pipelines), `GET /health` (system health). JWT auth. |
+| 30 | **REST API — agent and output endpoints** | `GET /agents` (26 agents with status), `GET /outputs/:taskId` (agent output), `POST /review/:taskId` (human approve/reject), `GET /metrics` (cost, quality, throughput). |
+| 30 | **WebSocket real-time updates** | Live streaming: task status changes, pipeline progress, agent execution logs. Dashboard subscribes for real-time updates. |
+| 31 | **Web dashboard — goal management** | Submit goals via web form. View goal progress (phases, tasks, timeline). Cancel or modify running goals. View completed goals with results. |
+| 31 | **Web dashboard — pipeline monitor** | View running pipelines with step-by-step progress. View agent outputs inline. See review decisions and revision history. |
+| 32 | **Web dashboard — analytics overview** | Cost tracking dashboard (daily/weekly/monthly spend). Quality metrics (approval rates, revision counts). Throughput (tasks completed per day). Budget utilization and forecasting. |
+| 32 | **Web dashboard — escalation center** | Pending approvals (human-in-the-loop decisions). Side-by-side output comparison (agent output vs. revision request). One-click approve/reject/request-changes. |
+| 33 | **MCP integration manager** | Web UI for connecting external tools: builds on Phase 3b's `tools.yaml` and Tool Registry. Enter API keys, authorize OAuth flows (GA4, Google Ads, Meta), test connections, view sync status. Credentials stored encrypted in DB. |
+| 33 | **Product context editor** | Web-based editor for product-marketing-context.md. Guided wizard for first-time setup. Version history. Changes propagate to all agents immediately. |
+| 34 | **Authentication + authorization** | Email/password + OAuth (Google, GitHub). Role-based access: admin (full), marketer (goals + review), viewer (read-only). API key management for programmatic access. |
+| 34 | **Multi-tenancy** | Per-tenant: product context, goals, outputs, connected tools (own `tools.yaml`), skill config, budget limits. Tenant isolation at database level. Shared infrastructure (agents, Claude API). |
+| 35 | **Billing + usage tracking** | Stripe billing integration. Plans: Free (limited goals/month), Pro (unlimited goals, basic integrations), Enterprise (all integrations, priority execution, custom agents). Usage-based pricing on API calls. |
+| 35 | **Onboarding flow** | New user: create account → run product-marketing-context wizard → connect tools via `tools.yaml` UI (GA4 recommended first) → submit first goal → see results. Target: 15-minute time-to-value. |
+| 36 | **Production deployment** | Railway deployment with auto-scaling. Managed PostgreSQL + Redis. CDN for dashboard. SSL. Monitoring (Sentry for errors, Uptime Robot for availability). |
+| 36 | **CI/CD pipeline** | GitHub Actions: lint → type-check → test (1472+ tests) → build → deploy to staging → smoke test → deploy to production. Rollback on failure. |
 
 **Deliverable:** A commercial SaaS product. Users sign up, connect their tools, submit goals, and watch a marketing team work. Self-serve, multi-tenant, with billing.
 
