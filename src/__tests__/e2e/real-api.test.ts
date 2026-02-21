@@ -384,6 +384,6 @@ describe.skipIf(!HAS_API_KEY)("E2E: Real Claude API", () => {
       console.log(
         `\n[Pipeline] SUCCESS — ${run.taskIds.length} tasks completed with real Claude API`,
       );
-    }, 180_000); // 3 minute timeout for full pipeline
+    }, 360_000); // 6 minute timeout for full pipeline (5 sequential real API calls)
   });
 });

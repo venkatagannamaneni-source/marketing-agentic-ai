@@ -15,13 +15,20 @@ describe("loadConfig", () => {
   // ── Required Field: ANTHROPIC_API_KEY ──────────────────────────────────
 
   it("throws ConfigError when ANTHROPIC_API_KEY is missing", () => {
-    expect(() => loadConfig({})).toThrow(ConfigError);
+    // Save and clear env to isolate from process.env
+    const saved = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
     try {
-      loadConfig({});
-    } catch (err) {
-      expect(err).toBeInstanceOf(ConfigError);
-      expect((err as ConfigError).field).toBe("ANTHROPIC_API_KEY");
-      expect((err as ConfigError).message).toContain("ANTHROPIC_API_KEY is required");
+      expect(() => loadConfig({})).toThrow(ConfigError);
+      try {
+        loadConfig({});
+      } catch (err) {
+        expect(err).toBeInstanceOf(ConfigError);
+        expect((err as ConfigError).field).toBe("ANTHROPIC_API_KEY");
+        expect((err as ConfigError).message).toContain("ANTHROPIC_API_KEY is required");
+      }
+    } finally {
+      if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
     }
   });
 
