@@ -37,35 +37,74 @@ The quality phase. Replace structural pattern-matching with Claude-powered seman
 
 6. **Cross-agent consistency check** — Director validates consistency across a pipeline's outputs: email copy matches landing page, social content aligns with blog post, etc.
 
-## Phase 4: Tool Integration + Real Execution (Weeks 13-20)
+## Phase 3b: Platform Hardening — Extensibility Layer (Weeks 12-14)
 
-The execution phase. Connect agents to real tools via MCP servers so they act, not just advise.
+**The phase that turns a hardcoded system into a configurable product.** This is a prerequisite for Phase 4's MCP tool integrations and Phase 6's multi-tenancy. Without it, every new skill, squad, or tool integration requires modifying TypeScript source files in 5+ locations.
 
-### 4a: Analytics & Measurement (Weeks 13-14)
-- GA4 MCP — read real traffic, conversion, bounce data
-- Google Search Console MCP — read real rankings, impressions, index coverage
-- Google Tag Manager MCP — deploy tracking events without code changes
-- PageSpeed Insights MCP — run real Lighthouse audits
+### Why this phase exists
 
-### 4b: Content Publishing (Weeks 15-16)
-- WordPress MCP — publish posts, pages, structured data
-- Webflow MCP — publish to CMS collections
-- GitHub MCP — create PRs for template pages, schema changes
-- Playwright page analysis — analyze real pages (already installed)
+This system is a product — Claude Code for Marketing. Users connect their own tools (GA4, Webflow, Mailchimp, Stripe) and the engine operates against their real stack. That model requires:
+- Skills, squads, and routing rules as **configuration** (not hardcoded arrays)
+- A **Tool Registry** where users declare which MCP servers to connect
+- A **dynamic Director prompt** that always matches the actual registry
+- A **validation layer** that catches config errors before runtime
 
-### 4c: Email & Marketing Automation (Weeks 17-18)
-- Mailchimp MCP — create campaigns, automations, read engagement
-- Customer.io MCP — behavior-triggered workflows, activation sequences
-- Resend MCP — transactional email
-- ESP-agnostic abstraction layer — unified interface across email providers
+### Priority order:
 
-### 4d: Advertising & Social (Weeks 19-20)
-- Google Ads MCP — create campaigns, read performance (CPC, ROAS)
-- Meta Ads MCP — create campaigns, audience targeting, read ROAS
-- Social media MCP — schedule posts to LinkedIn, Twitter/X via Buffer
-- Stripe MCP — read MRR, churn, plan distribution, trial conversions
+1. **Externalize skill registry** (Week 12) — Move `SKILL_NAMES`, `SKILL_SQUAD_MAP`, `AGENT_DEPENDENCY_GRAPH` from TypeScript `as const` arrays into a `skills.yaml` config file. Skill loader reads config at startup, builds registry dynamically. Adding a skill = YAML entry + SKILL.md file. No code changes.
 
-## Phase 5: Feedback Loops + Self-Optimization (Weeks 21-26)
+2. **Dynamic Director prompt** (Week 12) — Replace hardcoded `DIRECTOR_SYSTEM_PROMPT` ("26 agents, 5 squads") with `buildDirectorPrompt(registry)` that generates the prompt from the live skill registry. Squad listings, agent descriptions, decision rules all derived from config.
+
+3. **MCP Tool Registry + abstraction layer** (Week 13) — Create `ToolRegistry` interface: `registerTool(name, mcpConfig)`, `getToolsForSkill(skillName)`, `invokeTool(name, action, params)`. Executor passes available tools to Claude's tool_use API. Foundation for all Phase 4 integrations.
+
+4. **User tool configuration** (Week 13) — Create `tools.yaml` where users declare their connected tools: MCP server references, credential env var names, and which skills get access. The "onboard a new hire" experience.
+
+5. **Externalize routing, schedules, events** (Week 14) — Move `ROUTING_RULES`, `DEFAULT_SCHEDULES`, `DEFAULT_EVENT_MAPPINGS` to config files. Users can customize which pipelines run on what schedule and which events trigger which responses.
+
+6. **Single source of truth + validation CLI** (Week 14) — Merge duplicate budget thresholds. `bun run validate-skills` verifies config integrity: every skill has SKILL.md, valid squad, valid dependency edges, declared tools match available MCP servers.
+
+### What this enables:
+
+```
+Adding a new skill (BEFORE):  5 TypeScript file edits + recompile + redeploy
+Adding a new skill (AFTER):   1 YAML entry + 1 SKILL.md file
+
+Connecting a tool (BEFORE):   No way to do it — hardcoded system
+Connecting a tool (AFTER):    1 tools.yaml entry + install MCP server
+
+Director prompt (BEFORE):     Hardcodes "26 agents, 5 squads" — breaks if anything changes
+Director prompt (AFTER):      Auto-generated from live registry — always correct
+```
+
+## Phase 4: Tool Integration + Real Execution (Weeks 15-22)
+
+The execution phase. With the Tool Registry from Phase 3b in place, connect agents to real tools via MCP servers. Users configure which tools to connect through `tools.yaml` — the system discovers and binds tools to agents automatically.
+
+### 4a: Analytics & Measurement (Weeks 15-16)
+- GA4 MCP — read real traffic, conversion, bounce data (registered as `ga4`)
+- Google Search Console MCP — read real rankings, impressions, index coverage (registered as `search-console`)
+- Google Tag Manager MCP — deploy tracking events without code changes (registered as `gtm`)
+- PageSpeed Insights MCP — run real Lighthouse audits (registered as `pagespeed`)
+
+### 4b: Content Publishing (Weeks 17-18)
+- WordPress MCP — publish posts, pages, structured data (registered as `wordpress`)
+- Webflow MCP — publish to CMS collections (registered as `webflow`)
+- GitHub MCP — create PRs for template pages, schema changes (registered as `github`)
+- Playwright page analysis — analyze real pages (registered as `browser`, already installed)
+
+### 4c: Email & Marketing Automation (Weeks 19-20)
+- Mailchimp MCP — create campaigns, automations, read engagement (registered as `mailchimp`)
+- Customer.io MCP — behavior-triggered workflows, activation sequences (registered as `customerio`)
+- Resend MCP — transactional email (registered as `resend`)
+- ESP-agnostic abstraction — Tool Registry routes to user's configured ESP automatically
+
+### 4d: Advertising & Social (Weeks 21-22)
+- Google Ads MCP — create campaigns, read performance (registered as `google-ads`)
+- Meta Ads MCP — create campaigns, audience targeting, read ROAS (registered as `meta-ads`)
+- Social media MCP — schedule posts to LinkedIn, Twitter/X via Buffer (registered as `linkedin`, `twitter`, `buffer`)
+- Stripe MCP — read MRR, churn, plan distribution, trial conversions (registered as `stripe`)
+
+## Phase 5: Feedback Loops + Self-Optimization (Weeks 23-28)
 
 The intelligence phase. Close the loop: measure → detect → re-optimize → iterate.
 
@@ -81,7 +120,7 @@ The intelligence phase. Close the loop: measure → detect → re-optimize → i
 - Anomaly detection + alerting (traffic/conversion drops → auto-response)
 - Self-healing pipelines (failure → adjust strategy → retry)
 
-## Phase 6: Dashboard, API + Multi-tenancy (Weeks 27-34)
+## Phase 6: Dashboard, API + Multi-tenancy (Weeks 29-36)
 
 The product phase. Turn the engine into a commercial SaaS.
 
@@ -89,21 +128,23 @@ The product phase. Turn the engine into a commercial SaaS.
 - REST API (goals, tasks, pipelines, outputs, metrics, health)
 - WebSocket real-time updates
 - Web dashboard (goal management, pipeline monitor, analytics, escalation center)
-- MCP integration manager (connect tools via web UI)
+- MCP integration manager (connect tools via web UI — builds on Phase 3b's `tools.yaml`)
 - Product context editor (guided wizard)
 - Authentication + authorization (email/OAuth, RBAC)
-- Multi-tenancy (per-tenant isolation)
+- Multi-tenancy (per-tenant isolation — each tenant has own skills config + tool connections)
 - Billing (Stripe, usage-based plans)
-- Onboarding flow (15-minute time-to-value target)
+- Onboarding flow (15-minute time-to-value target: sign up → connect tools → set first goal)
 - Production deployment (Railway, managed DB/Redis, CI/CD)
 
 ## Key Technical Decisions Still Open
 
-- **MCP integration architecture**: Build custom MCP servers per tool, use community MCP servers where available, or wrap REST APIs directly? Need to evaluate per-tool. Some tools (GA4, Mailchimp) have community MCP servers. Others (Customer.io, Meta Ads) need custom implementation.
-- **OAuth2 flow**: Many Google APIs (GA4, Search Console, GTM, Ads) require OAuth2 user consent. Need a credential management system with token refresh. Phase 4 prerequisite.
-- **CMS selection**: Support WordPress (REST API) first — largest market share. Webflow second. Headless CMS (Contentful/Sanity) third. Can't support all at once; need adapter pattern.
-- **ESP selection**: Mailchimp (SMB) vs Customer.io (product-led) vs Resend (developer). Build unified interface, let user choose.
+- **MCP integration architecture**: Build custom MCP servers per tool, use community MCP servers where available, or wrap REST APIs directly? Need to evaluate per-tool. Some tools (GA4, Mailchimp) have community MCP servers. Others (Customer.io, Meta Ads) need custom implementation. Phase 3b's Tool Registry provides the abstraction layer regardless of approach.
+- **OAuth2 flow**: Many Google APIs (GA4, Search Console, GTM, Ads) require OAuth2 user consent. Need a credential management system with token refresh. Phase 3b establishes the credential reference pattern (`tools.yaml` → env vars); Phase 4 implements the actual OAuth flows.
+- **CMS selection**: Support WordPress (REST API) first — largest market share. Webflow second. Headless CMS (Contentful/Sanity) third. Tool Registry allows users to connect whichever they use.
+- **ESP selection**: Mailchimp (SMB) vs Customer.io (product-led) vs Resend (developer). Tool Registry + ESP abstraction layer lets users choose.
+- **Config format**: YAML vs JSON for `skills.yaml` and `tools.yaml`. YAML is more human-readable. JSON is stricter. Decision needed at Phase 3b start.
 - **File workspace vs PostgreSQL**: File workspace works for single-machine dev. Production needs PostgreSQL. Migration in Phase 6, but schema design should start in Phase 4.
 - **Deployment target**: Railway for initial deployment. Docker Compose for self-hosted. Consider Fly.io as failover.
 - **Cost management**: CostTracker infrastructure is built. Phase 4 will validate against real spend patterns when agents make real API calls to external tools.
-- **Rate limiting across tools**: Each external API has its own rate limits. Need per-tool rate limiting in addition to Claude API rate limiting. Phase 4 concern.
+- **Rate limiting across tools**: Each external API has its own rate limits. Phase 3b's Tool Registry should include per-tool rate limit configuration. Phase 4 implements the actual limiters.
+- **Hot-reload vs restart**: Phase 3b config changes require restart. Phase 6 dashboard could support hot-reload (change tools.yaml → system picks up changes without downtime). Decision deferred to Phase 6.

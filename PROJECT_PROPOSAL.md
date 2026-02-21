@@ -2,11 +2,19 @@
 
 ## Vision
 
-A **self-operating marketing team** — 26 specialized AI agents organized into squads, led by a Marketing Director agent, working 24/7 without human intervention. Agents strategize, create, optimize, measure, and iterate across the full marketing funnel. They hand off work to each other, review each other's outputs, respond to real-time data, and improve continuously.
+**Claude Code for Marketing** — an agentic AI product where users connect their own tools and a team of 26 specialized AI agents operates their entire marketing function autonomously.
 
-This is not a toolkit where a human picks one skill at a time. This is **a team that runs autonomously**, the way a real marketing department operates — except it never sleeps.
+This is not a toolkit, not a side project, not a document generator. This is a **product** — the same way Claude Code is a product for software engineering. Users bring their stack (GA4, HubSpot, Webflow, Mailchimp, Stripe, whatever they use), configure access via MCP tool connections, and the system operates against their real data in real time. Agents strategize, create, optimize, measure, and iterate across the full marketing funnel — 24/7, without human intervention.
 
-**Critical distinction:** This system doesn't just *advise* — it *acts*. Agents don't produce documents for humans to implement. They publish to your CMS, deploy email sequences, create ad campaigns, read real analytics, and optimize based on actual performance data. Through 30+ MCP server integrations, every agent can execute through real tools — the same tools a human marketing team would use.
+**The product model:**
+1. **User connects their tools** — GA4, CMS, email platform, ad accounts, SEO tools, Stripe — through a configuration layer (MCP servers). They grant access the same way they'd onboard a new hire: "here's our analytics, here's our CMS, here's our email platform."
+2. **User sets goals** — "Increase signups 20% this quarter" or "Launch our new API product to developers."
+3. **The system operates** — 26 agents organized into 5 squads, led by a Marketing Director agent, execute against the user's real tools. Content gets published to their CMS. Emails get deployed to their ESP. Analytics get read from their GA4. Tests get designed and measured against their real traffic.
+4. **The system improves itself** — feedback loops read real performance data, detect underperformance, re-optimize, and iterate. The user's marketing gets better every week without them touching it.
+
+**Critical distinction:** This system doesn't just *advise* — it *acts*. Agents don't produce documents for humans to implement. They publish to your CMS, deploy email sequences, create ad campaigns, read real analytics, and optimize based on actual performance data. Through user-configured MCP tool connections, every agent executes through the tools the user already uses — the same tools a human marketing team would use.
+
+**Why this architecture matters:** The system is built so that adding new skills, new squads, and new tool integrations is configuration — not code changes. A user in e-commerce and a user in developer tools connect different tools but use the same engine. The skill registry, squad structure, routing rules, and tool bindings are all externalized configuration, making the platform extensible to any marketing stack without forking the codebase.
 
 ---
 
@@ -736,57 +744,142 @@ The core product. 26 agents orchestrated by a Marketing Director, executing thro
 
 **Deliverable:** The Director can actually judge quality, give real feedback, and drive genuine improvement through revision. Output quality becomes measurable and improvable.
 
-### Phase 4: Tool Integration + Real Execution (Weeks 13-20)
+### Phase 3b: Platform Hardening — Extensibility Layer (Weeks 12-14)
 
-**The phase that transforms the system from a document generator into a team that ships.** This is the biggest phase because it connects agents to real external tools via MCP servers. Without this phase, every agent output is a markdown file a human must manually implement. After this phase, agents publish, deploy, track, and optimize through real platforms.
+**The phase that turns a hardcoded marketing system into a configurable product.** Today, adding a single new skill requires code changes in 5 files. Squad names, routing rules, pipeline templates, and the Director's system prompt are all hardcoded TypeScript arrays. This phase externalizes everything so the system becomes configuration-driven — the foundation that Phase 4's MCP integrations and Phase 6's multi-tenancy absolutely require.
 
-#### Phase 4a: Analytics & Measurement Tools (Weeks 13-14)
+**Why this phase exists:** This system is a product — like Claude Code for marketing. Users will connect their own tools, and the engine must support different marketing stacks without code changes. Phase 4 (MCP tool integrations) cannot be built on top of the current hardcoded architecture. Every tool integration would require modifying TypeScript source files, which is not how a product works.
 
-Agents can read real performance data, not work from assumptions.
+#### Problem: What's Currently Hardcoded (and Shouldn't Be)
+
+| Component | Current Location | Problem |
+|---|---|---|
+| `SKILL_NAMES` (26 entries) | `src/types/agent.ts:15-48` | `as const` array — adding a skill requires code change + TypeScript recompile |
+| `SQUAD_NAMES` (5 entries) | `src/types/agent.ts:3-9` | Same — no way to add a squad without modifying source |
+| `SKILL_SQUAD_MAP` | `src/types/agent.ts:56-88` | Must stay in sync with SKILL_NAMES manually |
+| `AGENT_DEPENDENCY_GRAPH` | `src/agents/registry.ts:9-56` | Manually maintained — no validation against registry |
+| `PIPELINE_TEMPLATES` (8 entries) | `src/agents/registry.ts:90-169` | Hardcoded array — can't be configured per-user |
+| `ROUTING_RULES` | `src/director/squad-router.ts:8-115` | Second source of truth for squad-skill mapping |
+| `DIRECTOR_SYSTEM_PROMPT` | `src/director/system-prompt.ts:1-97` | Hardcodes "26 agents" and "5 squads" as literal strings |
+| `DEFAULT_SCHEDULES` | `src/scheduler/default-schedules.ts` | Marketing-specific cron jobs, not configurable |
+| `DEFAULT_EVENT_MAPPINGS` | `src/events/default-mappings.ts` | Marketing-specific event handlers, not configurable |
+| Budget thresholds (80/90/95%) | `src/bootstrap.ts` AND `src/director/types.ts` | Duplicated in two files — can drift out of sync |
+
+**Adding one new skill today requires editing:** `types/agent.ts` (SKILL_NAMES + SKILL_SQUAD_MAP) → `agents/registry.ts` (dependency graph) → `director/squad-router.ts` (routing rules) → `director/system-prompt.ts` (prompt text) → create `.agents/skills/{name}/SKILL.md`. That's 5 files. A product cannot work this way.
+
+#### Solution: Configuration-Driven Architecture
 
 | Week | Task | Details |
 |---|---|---|
-| 13 | **GA4 MCP integration** | analytics-tracking reads real data: page views, conversion rates, bounce rates, user flow. ab-test-setup reads experiment results. Director reads KPI dashboards. Requires: Google Analytics Data API (OAuth2). |
-| 13 | **Google Search Console MCP** | seo-audit reads real ranking data: impressions, clicks, CTR by query, index coverage. content-strategy identifies real keyword opportunities. Requires: Search Console API (OAuth2). |
-| 14 | **Google Tag Manager MCP** | analytics-tracking deploys tracking events without manual code changes: creates tags, triggers, variables, publishes containers. Requires: Tag Manager API (OAuth2). |
-| 14 | **PageSpeed / Lighthouse MCP** | seo-audit runs real performance audits: Core Web Vitals scores, performance recommendations. page-cro reads real load times. Requires: PageSpeed Insights API (API key). |
+| 12 | **Externalize skill registry** | Move `SKILL_NAMES`, `SKILL_SQUAD_MAP`, and `AGENT_DEPENDENCY_GRAPH` into a `skills.yaml` (or `skills.json`) configuration file in `.agents/`. The skill loader reads this file at startup and builds the registry dynamically. Adding a skill = adding a YAML entry + creating a `SKILL.md` file. No TypeScript changes. No recompile. |
+| 12 | **Externalize squad definitions** | Move `SQUAD_NAMES` into the same config file. Squads are defined by which skills belong to them — not by a separate hardcoded array. Adding a squad = adding skills that reference it. |
+| 12 | **Dynamic system prompt generation** | Replace the hardcoded `DIRECTOR_SYSTEM_PROMPT` with a function `buildDirectorPrompt(registry)` that generates the prompt from the live skill registry. "You coordinate N agents in M squads" is computed, not literal. Squad listings, agent descriptions, and decision rules are all derived from the registry. The Director's prompt always matches reality. |
+| 13 | **MCP Tool Registry + Abstraction Layer** | Create a `ToolRegistry` interface: `registerTool(name, mcpConfig)`, `getToolsForSkill(skillName)`, `invokeTool(name, action, params)`. This is the foundation Phase 4 builds on. Each skill's config declares which tools it can use. Users configure which MCP servers to connect. The executor passes available tools to Claude's tool_use API. Skills that need GA4 get GA4 tools. Skills that don't, don't. |
+| 13 | **User tool configuration layer** | Create a `tools.yaml` (or equivalent) where users declare their connected tools: which MCP servers, credentials references (env var names, not actual secrets), and which skills have access. This is the "onboarding a new hire" experience — "here's our GA4, here's our Webflow, here's our Mailchimp." |
+| 13 | **Externalize routing rules** | Move `ROUTING_RULES` and `GOAL_CATEGORY_TEMPLATE_MAP` to configuration. Goal categories become extensible — users or future domains can add new categories without code changes. Routing rules reference skills by name (validated against the registry at startup). |
+| 14 | **Externalize schedules and event mappings** | Move `DEFAULT_SCHEDULES` and `DEFAULT_EVENT_MAPPINGS` to configuration files. Users can customize which pipelines run on what schedule, and which events trigger which responses. |
+| 14 | **Single source of truth for all config** | Merge the duplicated budget thresholds. Move all hardcoded limits (max revisions, max iterations, budget percentages, concurrency) into `RuntimeConfig` loaded from environment or config file. One place to change, one place to validate. |
+| 14 | **Skill validation CLI** | `bun run validate-skills` — reads the skill registry config, verifies every registered skill has a SKILL.md file, a valid squad assignment, valid dependency edges (no references to non-existent skills), and declared tool requirements that match available MCP servers. Catches configuration errors before runtime. |
+| 14 | **Registry integration tests** | End-to-end tests: load registry from config → build director prompt → verify prompt matches registry → register MCP tools → verify tool availability per skill → run a pipeline with dynamic registry. All existing 1472+ tests must still pass. |
 
-#### Phase 4b: Content Publishing Tools (Weeks 15-16)
+#### What This Enables
 
-Agents can publish content directly — no human copy-pasting from markdown files.
+```
+BEFORE (hardcoded):
+  User wants to add a "webinar-strategy" agent
+  → Developer edits 5 TypeScript files
+  → Developer recompiles
+  → Developer redeploys
+
+AFTER (config-driven):
+  User adds to skills.yaml:
+    - name: webinar-strategy
+      squad: strategy
+      dependencies: [content-strategy, email-sequence]
+      tools: [calendar-mcp, zoom-mcp]
+  User creates .agents/skills/webinar-strategy/SKILL.md
+  → System picks it up on next restart (or hot-reload in Phase 6)
+  → Director prompt automatically includes the new agent
+  → Routing rules automatically include the new squad member
+  → No code changes. No recompile. No redeploy.
+```
+
+```
+BEFORE (no tool abstraction):
+  Phase 4 MCP integrations have nothing to build on
+  → Each integration is a one-off wiring job
+  → No way for users to choose which tools to connect
+  → Agent executor doesn't know about tools
+
+AFTER (tool registry):
+  User configures tools.yaml:
+    ga4:
+      mcp_server: "@anthropic/ga4-mcp"
+      credentials_env: GA4_CREDENTIALS
+      skills: [analytics-tracking, ab-test-setup, director]
+    mailchimp:
+      mcp_server: "@anthropic/mailchimp-mcp"
+      credentials_env: MAILCHIMP_API_KEY
+      skills: [email-sequence, cold-email]
+  → Executor passes GA4 tools to analytics-tracking agent
+  → Executor passes Mailchimp tools to email-sequence agent
+  → Skills that don't need tools don't get them (simpler prompts, lower cost)
+  → Adding a new tool = adding a YAML entry + installing the MCP server
+```
+
+**Deliverable:** The system becomes a platform. Skills, squads, routing, schedules, events, and tools are all configuration. The engine is domain-agnostic — it happens to ship with a marketing configuration, but the core can power any domain. Phase 4 builds MCP integrations on top of a real tool abstraction layer, not ad-hoc wiring.
+
+### Phase 4: Tool Integration + Real Execution (Weeks 15-22)
+
+**The phase that transforms the system from a document generator into a team that ships.** With the Tool Registry and MCP abstraction layer from Phase 3b in place, this phase connects agents to real external tools via MCP servers. Users configure which tools to connect through `tools.yaml` — the system discovers and binds tools to the appropriate agents automatically. Without this phase, every agent output is a markdown file a human must manually implement. After this phase, agents publish, deploy, track, and optimize through the user's real platforms.
+
+#### Phase 4a: Analytics & Measurement Tools (Weeks 15-16)
+
+Agents can read real performance data, not work from assumptions. Users connect their analytics stack via tool configuration.
 
 | Week | Task | Details |
 |---|---|---|
-| 15 | **WordPress MCP integration** | copywriting creates/updates posts and pages. programmatic-seo publishes template pages at scale. schema-markup pushes JSON-LD structured data. Requires: WordPress REST API (application password or OAuth). |
-| 15 | **Webflow MCP integration** | copywriting publishes to Webflow CMS collections. page-cro updates page content for optimization. Requires: Webflow API (API token). |
-| 16 | **GitHub MCP integration** | programmatic-seo creates PRs for template page code. schema-markup commits structured data changes. Agents can propose code changes for developer review. Requires: GitHub API (PAT or GitHub App). |
-| 16 | **Playwright page analysis** | page-cro and seo-audit fetch and analyze real pages: screenshot, extract DOM, run accessibility checks. competitor-alternatives scrapes competitor pages for real pricing/feature data. Already installed (v1.56.1). |
+| 15 | **GA4 MCP integration** | analytics-tracking reads real data: page views, conversion rates, bounce rates, user flow. ab-test-setup reads experiment results. Director reads KPI dashboards. Registered in Tool Registry as `ga4`. Requires: Google Analytics Data API (OAuth2). |
+| 15 | **Google Search Console MCP** | seo-audit reads real ranking data: impressions, clicks, CTR by query, index coverage. content-strategy identifies real keyword opportunities. Registered as `search-console`. Requires: Search Console API (OAuth2). |
+| 16 | **Google Tag Manager MCP** | analytics-tracking deploys tracking events without manual code changes: creates tags, triggers, variables, publishes containers. Registered as `gtm`. Requires: Tag Manager API (OAuth2). |
+| 16 | **PageSpeed / Lighthouse MCP** | seo-audit runs real performance audits: Core Web Vitals scores, performance recommendations. page-cro reads real load times. Registered as `pagespeed`. Requires: PageSpeed Insights API (API key). |
 
-#### Phase 4c: Email & Marketing Automation (Weeks 17-18)
+#### Phase 4b: Content Publishing Tools (Weeks 17-18)
 
-Agents deploy real email sequences and automations — not just write copy.
-
-| Week | Task | Details |
-|---|---|---|
-| 17 | **Mailchimp MCP integration** | email-sequence creates campaigns and automation workflows. cold-email manages audiences and sends. Analytics reads engagement data (open rates, click rates). Requires: Mailchimp Marketing API (API key). |
-| 17 | **Customer.io MCP integration** | email-sequence creates behavior-triggered workflows. onboarding-cro deploys activation sequences triggered by product events. Reads delivery and engagement metrics. Requires: Customer.io API (API key). |
-| 18 | **Resend MCP integration** | email-sequence and cold-email send transactional emails. Reads delivery stats. Requires: Resend API (API key). |
-| 18 | **ESP-agnostic abstraction layer** | Build a unified email interface so agents don't need to know which ESP the user has. Agent calls `sendSequence()` → adapter routes to Mailchimp, Customer.io, or Resend based on config. |
-
-#### Phase 4d: Advertising & Social Platforms (Weeks 19-20)
-
-Agents create and manage real ad campaigns and social content.
+Agents can publish content directly — no human copy-pasting from markdown files. Users connect their CMS of choice.
 
 | Week | Task | Details |
 |---|---|---|
-| 19 | **Google Ads MCP integration** | paid-ads creates campaigns, ad groups, keywords, and ad copy. Reads performance data (CPC, CTR, ROAS, conversion rate). Requires: Google Ads API (OAuth2 + developer token). |
-| 19 | **Meta Ads MCP integration** | paid-ads creates Facebook/Instagram campaigns with audience targeting. social-content promotes high-performing organic posts. Reads ROAS data. Requires: Meta Marketing API (system user token). |
-| 20 | **Social media MCP integrations** | social-content schedules posts to LinkedIn (LinkedIn API), Twitter/X (Twitter API v2). Buffer/Hootsuite integration for cross-platform scheduling. Reads engagement metrics per platform. |
-| 20 | **Stripe MCP integration** | pricing-strategy reads real MRR, churn rate, plan distribution, trial conversion rates. paywall-upgrade-cro reads upgrade funnel data. referral-program tracks referral revenue. Requires: Stripe API (secret key, read-only). |
+| 17 | **WordPress MCP integration** | copywriting creates/updates posts and pages. programmatic-seo publishes template pages at scale. schema-markup pushes JSON-LD structured data. Registered as `wordpress`. Requires: WordPress REST API (application password or OAuth). |
+| 17 | **Webflow MCP integration** | copywriting publishes to Webflow CMS collections. page-cro updates page content for optimization. Registered as `webflow`. Requires: Webflow API (API token). |
+| 18 | **GitHub MCP integration** | programmatic-seo creates PRs for template page code. schema-markup commits structured data changes. Agents can propose code changes for developer review. Registered as `github`. Requires: GitHub API (PAT or GitHub App). |
+| 18 | **Playwright page analysis** | page-cro and seo-audit fetch and analyze real pages: screenshot, extract DOM, run accessibility checks. competitor-alternatives scrapes competitor pages for real pricing/feature data. Registered as `browser`. Already installed (v1.56.1). |
 
-**Deliverable:** Agents don't just plan — they execute. Content gets published. Emails get deployed. Ads get created. Analytics get read. The system becomes a team that ships.
+#### Phase 4c: Email & Marketing Automation (Weeks 19-20)
 
-### Phase 5: Feedback Loops + Self-Optimization (Weeks 21-26)
+Agents deploy real email sequences and automations — not just write copy. Users connect their ESP of choice — the system adapts.
+
+| Week | Task | Details |
+|---|---|---|
+| 19 | **Mailchimp MCP integration** | email-sequence creates campaigns and automation workflows. cold-email manages audiences and sends. Analytics reads engagement data (open rates, click rates). Registered as `mailchimp`. Requires: Mailchimp Marketing API (API key). |
+| 19 | **Customer.io MCP integration** | email-sequence creates behavior-triggered workflows. onboarding-cro deploys activation sequences triggered by product events. Reads delivery and engagement metrics. Registered as `customerio`. Requires: Customer.io API (API key). |
+| 20 | **Resend MCP integration** | email-sequence and cold-email send transactional emails. Reads delivery stats. Registered as `resend`. Requires: Resend API (API key). |
+| 20 | **ESP-agnostic abstraction layer** | Build a unified email interface so agents don't need to know which ESP the user has. Tool Registry routes to the user's configured ESP automatically. Agent calls email tools → Tool Registry resolves to Mailchimp, Customer.io, or Resend based on `tools.yaml`. |
+
+#### Phase 4d: Advertising & Social Platforms (Weeks 21-22)
+
+Agents create and manage real ad campaigns and social content. Users connect their ad accounts and social profiles.
+
+| Week | Task | Details |
+|---|---|---|
+| 21 | **Google Ads MCP integration** | paid-ads creates campaigns, ad groups, keywords, and ad copy. Reads performance data (CPC, CTR, ROAS, conversion rate). Registered as `google-ads`. Requires: Google Ads API (OAuth2 + developer token). |
+| 21 | **Meta Ads MCP integration** | paid-ads creates Facebook/Instagram campaigns with audience targeting. social-content promotes high-performing organic posts. Reads ROAS data. Registered as `meta-ads`. Requires: Meta Marketing API (system user token). |
+| 22 | **Social media MCP integrations** | social-content schedules posts to LinkedIn (LinkedIn API), Twitter/X (Twitter API v2). Buffer/Hootsuite integration for cross-platform scheduling. Reads engagement metrics per platform. Registered as `linkedin`, `twitter`, `buffer`. |
+| 22 | **Stripe MCP integration** | pricing-strategy reads real MRR, churn rate, plan distribution, trial conversion rates. paywall-upgrade-cro reads upgrade funnel data. referral-program tracks referral revenue. Registered as `stripe`. Requires: Stripe API (secret key, read-only). |
+
+**Deliverable:** Agents don't just plan — they execute. Content gets published to the user's CMS. Emails get deployed to their ESP. Ads get created in their ad accounts. Analytics get read from their dashboards. Every tool connection is user-configured, not hardcoded. The system becomes a team that ships — using the user's own tools.
+
+### Phase 5: Feedback Loops + Self-Optimization (Weeks 23-28)
 
 **The phase that makes the system intelligent.** With real tools connected (Phase 4) and semantic review (Phase 3), the system can now close the loop: measure results → detect underperformance → re-optimize → measure again. This is what makes it a *self-operating* marketing team, not just an automation pipeline.
 
@@ -807,7 +900,7 @@ Agents create and manage real ad campaigns and social content.
 
 **Deliverable:** The system improves itself. It measures real results, detects underperformance, re-optimizes, and iterates — the way a real marketing team does weekly standups and retrospectives, except it does it 24/7.
 
-### Phase 6: Dashboard, API + Multi-tenancy (Weeks 27-34)
+### Phase 6: Dashboard, API + Multi-tenancy (Weeks 29-36)
 
 **The phase that turns the engine into a product.** Everything before this serves a single user via CLI. This phase adds a web interface, programmatic API, and multi-tenant support.
 
@@ -839,9 +932,10 @@ Agents create and manage real ad campaigns and social content.
 | Phase 1 (Director + Engine) | Weeks 1-4 | 1-2 developers | $500-1K (Claude API) | ✓ Complete |
 | Phase 2 (24/7 Runtime) | Weeks 5-8 | 1-2 developers | $1K-2K (API + Redis) | ✓ Complete |
 | Phase 3 (Semantic Review) | Weeks 9-12 | 1-2 developers | $2K-3K (API — more Claude calls for review) |
-| Phase 4 (Tool Integration) | Weeks 13-20 | 2-3 developers | $3K-8K (API + hosting + external tool subscriptions) |
-| Phase 5 (Feedback Loops) | Weeks 21-26 | 2-3 developers + 1 marketer | $5K-10K (API + all integrations running) |
-| Phase 6 (Dashboard + SaaS) | Weeks 27-34 | 3-4 developers + 1 designer | $10K-25K (full stack + infrastructure) |
+| Phase 3b (Platform Hardening) | Weeks 12-14 | 1-2 developers | $1K-2K (config layer + tool registry — mostly refactoring, low API cost) |
+| Phase 4 (Tool Integration) | Weeks 15-22 | 2-3 developers | $3K-8K (API + hosting + external tool subscriptions) |
+| Phase 5 (Feedback Loops) | Weeks 23-28 | 2-3 developers + 1 marketer | $5K-10K (API + all integrations running) |
+| Phase 6 (Dashboard + SaaS) | Weeks 29-36 | 3-4 developers + 1 designer | $10K-25K (full stack + infrastructure) |
 
 ### User's External Tool Requirements by Phase
 
@@ -851,10 +945,11 @@ What the user needs to provide (accounts/API keys) at each phase:
 |---|---|---|
 | Phase 1-2 | `ANTHROPIC_API_KEY`, Redis (Docker) | — |
 | Phase 3 | Same as above | — |
-| Phase 4a | GA4 account, Search Console access | Mixpanel/PostHog account |
-| Phase 4b | CMS account (WordPress or Webflow) | GitHub repo access |
-| Phase 4c | Email platform account (Mailchimp, Customer.io, or Resend) | — |
-| Phase 4d | Google Ads account, Stripe account | Meta Ads, LinkedIn Ads, social media accounts |
+| Phase 3b | Same as above | MCP server for testing tool registry (any tool) |
+| Phase 4a | GA4 account, Search Console access (configured in `tools.yaml`) | Mixpanel/PostHog account |
+| Phase 4b | CMS account — WordPress or Webflow (configured in `tools.yaml`) | GitHub repo access |
+| Phase 4c | Email platform — Mailchimp, Customer.io, or Resend (configured in `tools.yaml`) | — |
+| Phase 4d | Google Ads account, Stripe account (configured in `tools.yaml`) | Meta Ads, LinkedIn Ads, social media accounts |
 | Phase 5 | All Phase 4 tools actively running | SEO tool (Ahrefs/SEMrush) |
 | Phase 6 | Nothing new — SaaS manages its own infra | Custom domain for dashboard |
 
@@ -1254,4 +1349,4 @@ MEASURE produces for ALL (feedback):
 
 ---
 
-*This proposal defines the blueprint for a 24/7 autonomous marketing team powered by 26 specialized Claude agents, coordinated by a Marketing Director agent, connected to 30+ external platforms via MCP servers, and capable of executing — not just advising — across the full marketing stack. 6 phases, 34 weeks, from orchestration engine to commercial SaaS product.*
+*This proposal defines the blueprint for Claude Code for Marketing — a 24/7 autonomous marketing team powered by specialized Claude agents, coordinated by a Marketing Director agent, connected to the user's own tools via configurable MCP servers, and capable of executing — not just advising — across the full marketing stack. Users connect their tools, set goals, and the system operates. 7 phases, 36 weeks, from orchestration engine to commercial SaaS product.*

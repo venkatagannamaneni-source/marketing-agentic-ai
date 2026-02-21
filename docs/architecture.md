@@ -79,6 +79,47 @@ The composition root. `bootstrap(config)` wires all 14 modules in dependency ord
 - `EventMapping` — maps event types to pipeline templates with conditions and cooldowns
 - `GoalResult` — result of a full goal run (status, tasks, cost, phases, duration)
 
+## Extensibility Audit — What's Hardcoded (Phase 3b Target)
+
+The system currently has high-friction extensibility. The following components are hardcoded as TypeScript `as const` arrays and require code changes + recompile to modify. Phase 3b (Platform Hardening) will externalize all of these into configuration files.
+
+### Current hardcoded components:
+
+| Component | File | Lines | Impact |
+|---|---|---|---|
+| `SKILL_NAMES` (26 skills) | `types/agent.ts` | 15-48 | Adding a skill requires code change here |
+| `SQUAD_NAMES` (5 squads) | `types/agent.ts` | 3-9 | Adding a squad requires code change here |
+| `SKILL_SQUAD_MAP` | `types/agent.ts` | 56-88 | Must stay in sync with SKILL_NAMES manually |
+| `AGENT_DEPENDENCY_GRAPH` | `agents/registry.ts` | 9-56 | No runtime validation, manual maintenance |
+| `PIPELINE_TEMPLATES` (8 templates) | `agents/registry.ts` | 90-169 | Cannot be configured per-user |
+| `ROUTING_RULES` | `director/squad-router.ts` | 8-115 | Second source of truth for squad-skill mapping |
+| `DIRECTOR_SYSTEM_PROMPT` | `director/system-prompt.ts` | 1-97 | Hardcodes "26 agents, 5 squads" as literals |
+| `DEFAULT_SCHEDULES` | `scheduler/default-schedules.ts` | all | Marketing-specific, not configurable |
+| `DEFAULT_EVENT_MAPPINGS` | `events/default-mappings.ts` | all | Marketing-specific, not configurable |
+| Budget thresholds (80/90/95%) | `bootstrap.ts` + `director/types.ts` | multiple | Duplicated in two files |
+
+### Adding a single new skill today requires changes in:
+1. `types/agent.ts` — SKILL_NAMES array + SKILL_SQUAD_MAP
+2. `agents/registry.ts` — AGENT_DEPENDENCY_GRAPH
+3. `director/squad-router.ts` — ROUTING_RULES (if new goal category)
+4. `director/system-prompt.ts` — system prompt text
+5. `.agents/skills/{name}/SKILL.md` — skill definition file
+
+### Phase 3b target: Configuration-driven architecture
+- `skills.yaml` — skill names, squad assignments, dependency edges, tool requirements
+- `tools.yaml` — user's connected MCP servers, credential references, skill access
+- `buildDirectorPrompt(registry)` — dynamic prompt generation from live registry
+- `ToolRegistry` — interface for registering, discovering, and invoking MCP tools
+- `bun run validate-skills` — CLI to verify config integrity before runtime
+
+### What's already well-abstracted (no changes needed):
+- `WorkspaceManager` — clean interface, testable
+- `ClaudeClient` — mock + real implementations
+- `CostTracker` — modular, extensible
+- `Logger` — properly abstracted with pino
+- `QueueAdapter` / `WorkerAdapter` — abstract BullMQ interfaces
+- `RuntimeConfig` — validated env var loading
+
 ## Dependency Flow
 
 ```
