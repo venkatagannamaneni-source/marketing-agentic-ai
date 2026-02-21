@@ -19,11 +19,15 @@ export {
 export {
   ToolRegistry,
   ToolRegistryError,
+  StubToolProvider,
+  type ToolProvider,
   type ToolRegistryData,
   type ToolConfigData,
   type ToolActionData,
-  type ClaudeToolDefinition,
   type ToolInvocationResult,
+  type ToolResultContent,
+  type ToolResultTextContent,
+  type ToolResultImageContent,
 } from "./tool-registry.ts";
 
 // ── Claude Client ───────────────────────────────────────────────────────
@@ -33,9 +37,11 @@ export type {
   ClaudeMessage,
   ClaudeMessageResult,
   ClaudeToolDef,
+  ClaudeToolChoice,
   ClaudeTextBlock,
   ClaudeToolUseBlock,
   ClaudeToolResultBlock,
+  ClaudeToolResultContentBlock,
   ClaudeContentBlock,
   ExecutionErrorCode,
 } from "./claude-client.ts";

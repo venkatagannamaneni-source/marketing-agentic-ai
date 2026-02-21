@@ -23,6 +23,7 @@ export interface RuntimeConfig {
     readonly format: LogFormat;
   };
   readonly maxParallelAgents: number;
+  readonly maxToolIterations: number;
 }
 
 // ── Config Error ───────────────────────────────────────────────────────────
@@ -139,6 +140,19 @@ export function loadConfig(
     }
   }
 
+  // ── Tool Iterations ──────────────────────────────────────────────────
+  const maxToolIterRaw = env("MAX_TOOL_ITERATIONS");
+  let maxToolIterations = 10;
+  if (maxToolIterRaw !== undefined && maxToolIterRaw !== "") {
+    maxToolIterations = parseInt(maxToolIterRaw, 10);
+    if (!Number.isFinite(maxToolIterations) || maxToolIterations < 1) {
+      throw new ConfigError(
+        `MAX_TOOL_ITERATIONS must be a positive integer (>= 1), got "${maxToolIterRaw}".`,
+        "MAX_TOOL_ITERATIONS",
+      );
+    }
+  }
+
   // ── Build and freeze ──────────────────────────────────────────────────
   const config: RuntimeConfig = {
     anthropicApiKey,
@@ -159,6 +173,7 @@ export function loadConfig(
       format: logFormat,
     },
     maxParallelAgents,
+    maxToolIterations,
   };
 
   return Object.freeze({

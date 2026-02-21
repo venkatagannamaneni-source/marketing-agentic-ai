@@ -374,7 +374,7 @@ describe("ToolRegistry.invokeTool", () => {
     const result = await registry.invokeTool("test-tool__query-data", {
       query: "test",
     });
-    const parsed = JSON.parse(result.content);
+    const parsed = JSON.parse(result.content as string);
     expect(parsed.stub).toBe(true);
     expect(parsed.tool).toBe("test-tool");
     expect(parsed.action).toBe("query-data");
