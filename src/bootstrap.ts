@@ -127,6 +127,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     defaultMaxTokens: 8192,
     maxRetries: 3,
     maxContextTokens: 150_000,
+    maxToolIterations: config.maxToolIterations,
   };
 
   // 6. Agent Executor

@@ -9,6 +9,11 @@ export interface ClaudeClient {
   createMessage(params: ClaudeMessageParams): Promise<ClaudeMessageResult>;
 }
 
+export interface ClaudeToolChoice {
+  readonly type: "auto" | "any" | "tool";
+  readonly name?: string;
+}
+
 export interface ClaudeMessageParams {
   readonly model: string;
   readonly system: string;
@@ -17,6 +22,7 @@ export interface ClaudeMessageParams {
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
   readonly tools?: readonly ClaudeToolDef[];
+  readonly toolChoice?: ClaudeToolChoice;
 }
 
 export interface ClaudeToolDef {
@@ -51,9 +57,27 @@ export interface ClaudeToolUseBlock {
 export interface ClaudeToolResultBlock {
   readonly type: "tool_result";
   readonly tool_use_id: string;
-  readonly content: string;
+  readonly content: string | readonly ClaudeToolResultContentBlock[];
   readonly is_error?: boolean;
 }
+
+export interface ClaudeToolResultTextBlock {
+  readonly type: "text";
+  readonly text: string;
+}
+
+export interface ClaudeToolResultImageBlock {
+  readonly type: "image";
+  readonly source: {
+    readonly type: "base64";
+    readonly media_type: string;
+    readonly data: string;
+  };
+}
+
+export type ClaudeToolResultContentBlock =
+  | ClaudeToolResultTextBlock
+  | ClaudeToolResultImageBlock;
 
 export type ClaudeContentBlock =
   | ClaudeTextBlock
@@ -263,6 +287,11 @@ export class AnthropicClaudeClient implements ClaudeClient {
                     description: t.description,
                     input_schema: t.input_schema as Anthropic.Tool.InputSchema,
                   })),
+                  ...(params.toolChoice
+                    ? {
+                        tool_choice: params.toolChoice as Anthropic.ToolChoice,
+                      }
+                    : {}),
                 }
               : {}),
           },

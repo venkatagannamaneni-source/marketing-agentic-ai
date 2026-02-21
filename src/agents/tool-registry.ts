@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
+import type { ClaudeToolDef } from "./claude-client.ts";
 
 // ── YAML Config Schema ──────────────────────────────────────────────────────
 
@@ -30,18 +31,26 @@ export interface ToolRegistryData {
   readonly tools: Record<string, ToolConfigData>;
 }
 
-// ── Claude Tool Definition ──────────────────────────────────────────────────
-// Shape produced for the Anthropic SDK `tools` parameter.
+// ── Tool Result Content Types ────────────────────────────────────────────────
+// Matches the Anthropic SDK's content block types for tool results.
+// Phase 3b uses string-only content. Phase 4 MCP tools may return images,
+// documents, and other rich content types.
 
-export interface ClaudeToolDefinition {
-  readonly name: string;
-  readonly description: string;
-  readonly input_schema: {
-    readonly type: "object";
-    readonly properties?: Record<string, unknown> | null;
-    readonly required?: readonly string[] | null;
+export interface ToolResultTextContent {
+  readonly type: "text";
+  readonly text: string;
+}
+
+export interface ToolResultImageContent {
+  readonly type: "image";
+  readonly source: {
+    readonly type: "base64";
+    readonly media_type: string;
+    readonly data: string;
   };
 }
+
+export type ToolResultContent = ToolResultTextContent | ToolResultImageContent;
 
 // ── Tool Invocation Result ──────────────────────────────────────────────────
 
@@ -49,7 +58,7 @@ export interface ToolInvocationResult {
   readonly toolName: string;
   readonly actionName: string;
   readonly success: boolean;
-  readonly content: string;
+  readonly content: string | readonly ToolResultContent[];
   readonly durationMs: number;
   readonly isStub: boolean;
 }
@@ -66,9 +75,56 @@ export class ToolRegistryError extends Error {
   }
 }
 
+// ── Tool Provider Interface ─────────────────────────────────────────────────
+// Abstraction for tool execution backends. Phase 3b uses StubToolProvider.
+// Phase 4 will add MCPToolProvider (wrapping MCPClientLike.callTool()) and
+// RESTToolProvider.
+
+export interface ToolProvider {
+  invoke(
+    toolName: string,
+    actionName: string,
+    params: Record<string, unknown>,
+  ): Promise<ToolInvocationResult>;
+}
+
+/**
+ * Stub provider that returns placeholder results.
+ * Used during Phase 3b — all invocations succeed with stub metadata.
+ */
+export class StubToolProvider implements ToolProvider {
+  async invoke(
+    toolName: string,
+    actionName: string,
+    params: Record<string, unknown>,
+  ): Promise<ToolInvocationResult> {
+    const startTime = Date.now();
+    return {
+      toolName,
+      actionName,
+      success: true,
+      content: JSON.stringify({
+        stub: true,
+        tool: toolName,
+        action: actionName,
+        params,
+        message: `Stub invocation of ${toolName}/${actionName}. Real implementation in Phase 4.`,
+      }),
+      durationMs: Date.now() - startTime,
+      isStub: true,
+    };
+  }
+}
+
 // ── Valid Providers ─────────────────────────────────────────────────────────
 
 const VALID_PROVIDERS = ["stub", "mcp", "rest"] as const;
+
+// Slug format: lowercase alphanumeric with hyphens, no leading/trailing hyphens.
+// Prevents qualified name separator ("__") collisions and ensures valid YAML keys.
+const SLUG_RE = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
+
+const DEFAULT_PROVIDER = new StubToolProvider();
 
 // ── Tool Registry ───────────────────────────────────────────────────────────
 
@@ -89,14 +145,14 @@ export class ToolRegistry {
   private readonly tools: ReadonlyMap<string, ToolConfigData>;
   private readonly skillToolMap: ReadonlyMap<
     string,
-    readonly ClaudeToolDefinition[]
+    readonly ClaudeToolDef[]
   >;
   private readonly toolSkillMap: ReadonlyMap<string, readonly string[]>;
 
   private constructor(data: ToolRegistryData) {
     const toolNames: string[] = [];
     const tools = new Map<string, ToolConfigData>();
-    const skillToolMap = new Map<string, ClaudeToolDefinition[]>();
+    const skillToolMap = new Map<string, ClaudeToolDef[]>();
     const toolSkillMap = new Map<string, string[]>();
 
     for (const [toolName, config] of Object.entries(data.tools)) {
@@ -107,7 +163,7 @@ export class ToolRegistry {
       if (!isEnabled) continue;
 
       // Build Claude tool definitions for each action
-      const toolDefs: ClaudeToolDefinition[] = [];
+      const toolDefs: ClaudeToolDef[] = [];
       for (const action of config.actions) {
         toolDefs.push({
           name: `${toolName}__${action.name}`,
@@ -194,7 +250,7 @@ export class ToolRegistry {
    * Get Claude API tool definitions for all enabled tools assigned to a skill.
    * Returns empty array if the skill has no tools.
    */
-  getToolsForSkill(skillName: string): readonly ClaudeToolDefinition[] {
+  getToolsForSkill(skillName: string): readonly ClaudeToolDef[] {
     return this.skillToolMap.get(skillName) ?? [];
   }
 
@@ -257,15 +313,17 @@ export class ToolRegistry {
   /**
    * Invoke a tool by its qualified name ("{toolName}__{actionName}").
    *
-   * Phase 3b: Always returns stub results.
-   * Phase 4: Will switch on provider type (mcp, rest, stub).
+   * Parses the qualified name, validates the tool and action exist,
+   * then delegates to the appropriate ToolProvider.
+   *
+   * Phase 3b: All tools use StubToolProvider.
+   * Phase 4: Routes to MCPToolProvider or RESTToolProvider based on config.provider.
    */
   async invokeTool(
     qualifiedName: string,
     params: Record<string, unknown>,
+    provider?: ToolProvider,
   ): Promise<ToolInvocationResult> {
-    const startTime = Date.now();
-
     // Parse qualified name
     const separatorIndex = qualifiedName.indexOf("__");
     if (separatorIndex === -1) {
@@ -299,22 +357,8 @@ export class ToolRegistry {
       );
     }
 
-    // Phase 3b: Stub invocation
-    const durationMs = Date.now() - startTime;
-    return {
-      toolName,
-      actionName,
-      success: true,
-      content: JSON.stringify({
-        stub: true,
-        tool: toolName,
-        action: actionName,
-        params,
-        message: `Stub invocation of ${toolName}/${actionName}. Real implementation in Phase 4.`,
-      }),
-      durationMs,
-      isStub: true,
-    };
+    // Delegate to provider (default: stub)
+    return (provider ?? DEFAULT_PROVIDER).invoke(toolName, actionName, params);
   }
 
   // ── Validation ──────────────────────────────────────────────────────────
@@ -341,6 +385,11 @@ export class ToolRegistry {
     if (d.tools && typeof d.tools === "object" && !Array.isArray(d.tools)) {
       const tools = d.tools as Record<string, unknown>;
       for (const [toolName, toolConfig] of Object.entries(tools)) {
+        if (!SLUG_RE.test(toolName)) {
+          errors.push(
+            `Tool "${toolName}": name must be lowercase alphanumeric with hyphens (e.g. "ga4", "search-console")`,
+          );
+        }
         if (!toolConfig || typeof toolConfig !== "object") {
           errors.push(`Tool "${toolName}": must be an object`);
           continue;
@@ -372,6 +421,10 @@ export class ToolRegistry {
             if (typeof action.name !== "string") {
               errors.push(
                 `Tool "${toolName}" action[${i}]: missing or invalid 'name' (expected string)`,
+              );
+            } else if (!SLUG_RE.test(action.name)) {
+              errors.push(
+                `Tool "${toolName}" action[${i}]: name "${action.name}" must be lowercase alphanumeric with hyphens (e.g. "query-events")`,
               );
             }
             if (typeof action.description !== "string") {

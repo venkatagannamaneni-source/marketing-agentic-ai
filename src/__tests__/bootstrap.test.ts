@@ -13,6 +13,7 @@ function makeTestConfig(overrides?: Partial<RuntimeConfig>): RuntimeConfig {
     budget: { totalMonthly: 100 },
     logging: { level: "silent" as const, format: "json" as const },
     maxParallelAgents: 2,
+    maxToolIterations: 10,
     ...overrides,
   });
 }

@@ -380,43 +380,52 @@ export class AgentExecutor {
             content: result.contentBlocks ?? [],
           });
 
-          // Invoke each tool sequentially and build tool_result blocks
-          const toolResultBlocks: ClaudeToolResultBlock[] = [];
-          for (const toolUse of toolUseBlocks) {
-            try {
-              const invocationResult = await this.toolRegistry.invokeTool(
-                toolUse.name,
-                toolUse.input,
-              );
-              toolInvocations.push({
-                qualifiedName: toolUse.name,
-                params: toolUse.input,
-                success: invocationResult.success,
-                isStub: invocationResult.isStub,
-                durationMs: invocationResult.durationMs,
-              });
-              toolResultBlocks.push({
-                type: "tool_result",
-                tool_use_id: toolUse.id,
-                content: invocationResult.content,
-                is_error: !invocationResult.success,
-              });
-            } catch (err: unknown) {
-              // Tool invocation failed — send error result back to Claude
-              toolResultBlocks.push({
-                type: "tool_result",
-                tool_use_id: toolUse.id,
-                content: `Tool invocation error: ${errorMessage(err)}`,
-                is_error: true,
-              });
-              toolInvocations.push({
-                qualifiedName: toolUse.name,
-                params: toolUse.input,
-                success: false,
-                isStub: false,
-                durationMs: 0,
-              });
-            }
+          // Invoke tools in parallel (matches Anthropic SDK ToolRunner pattern)
+          const toolResults = await Promise.all(
+            toolUseBlocks.map(async (toolUse) => {
+              try {
+                const invocationResult = await this.toolRegistry!.invokeTool(
+                  toolUse.name,
+                  toolUse.input,
+                );
+                return {
+                  record: {
+                    qualifiedName: toolUse.name,
+                    params: toolUse.input,
+                    success: invocationResult.success,
+                    isStub: invocationResult.isStub,
+                    durationMs: invocationResult.durationMs,
+                  } satisfies ToolInvocationRecord,
+                  block: {
+                    type: "tool_result" as const,
+                    tool_use_id: toolUse.id,
+                    content: invocationResult.content,
+                    is_error: !invocationResult.success,
+                  } satisfies ClaudeToolResultBlock,
+                };
+              } catch (err: unknown) {
+                return {
+                  record: {
+                    qualifiedName: toolUse.name,
+                    params: toolUse.input,
+                    success: false,
+                    isStub: false,
+                    durationMs: 0,
+                  } satisfies ToolInvocationRecord,
+                  block: {
+                    type: "tool_result" as const,
+                    tool_use_id: toolUse.id,
+                    content: `Tool invocation error: ${errorMessage(err)}`,
+                    is_error: true,
+                  } satisfies ClaudeToolResultBlock,
+                };
+              }
+            }),
+          );
+
+          const toolResultBlocks = toolResults.map((r) => r.block);
+          for (const r of toolResults) {
+            toolInvocations.push(r.record);
           }
 
           // Add user message with tool results
