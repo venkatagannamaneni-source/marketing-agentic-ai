@@ -3,6 +3,8 @@ import type { WorkspaceManager } from "../workspace/workspace-manager.ts";
 import type { MarketingDirector } from "../director/director.ts";
 import type { AgentExecutor } from "../agents/executor.ts";
 import type { BudgetState } from "../director/types.ts";
+import { NULL_LOGGER } from "../observability/logger.ts";
+import type { Logger } from "../observability/logger.ts";
 import type {
   TaskQueueConfig,
   QueueJobData,
@@ -32,6 +34,7 @@ export interface TaskQueueManagerDeps {
   readonly queue: QueueAdapter;
   readonly worker: WorkerAdapter;
   readonly redis: RedisConnectionManager;
+  readonly logger?: Logger;
 }
 
 export type EnqueueResult = "enqueued" | "deferred" | "fallback";
@@ -43,6 +46,7 @@ export class TaskQueueManager {
   private readonly queue: QueueAdapter;
   private readonly worker: WorkerAdapter;
   private readonly redis: RedisConnectionManager;
+  private readonly logger: Logger;
   private readonly budgetGate: BudgetGate;
   private readonly failureTracker: FailureTracker;
   private readonly fallbackQueue: FallbackQueue;
@@ -62,10 +66,11 @@ export class TaskQueueManager {
     this.queue = deps.queue;
     this.worker = deps.worker;
     this.redis = deps.redis;
+    this.logger = (deps.logger ?? NULL_LOGGER).child({ module: "queue-manager" });
     this.budgetGate = new BudgetGate();
     this.failureTracker = new FailureTracker();
     this.fallbackQueue = new FallbackQueue(this.config.fallbackDir);
-    this.completionRouter = new CompletionRouter(deps.workspace, deps.director);
+    this.completionRouter = new CompletionRouter(deps.workspace, deps.director, this.logger);
 
     this.wireWorkerEvents();
   }
@@ -81,11 +86,13 @@ export class TaskQueueManager {
     const decision = this.budgetGate.check(task, budget);
 
     if (decision === "block") {
+      this.logger.debug("queue_enqueue_blocked", { taskId: task.id, priority: task.priority });
       await this.workspace.updateTaskStatus(task.id, "blocked");
       return "deferred";
     }
 
     if (decision === "defer") {
+      this.logger.debug("queue_enqueue_deferred", { taskId: task.id, priority: task.priority });
       await this.workspace.updateTaskStatus(task.id, "deferred");
       return "deferred";
     }
@@ -112,9 +119,11 @@ export class TaskQueueManager {
         removeOnFail: false,
       });
       this.enqueueTimestamps.set(task.id, Date.now());
+      this.logger.debug("queue_enqueued", { taskId: task.id, skill: task.to, priority: task.priority });
       return "enqueued";
     } catch {
       // Redis likely down — fall back to file queue
+      this.logger.warn("queue_enqueue_fallback", { taskId: task.id, reason: "redis_down" });
       await this.fallbackQueue.enqueue(jobData);
       return "fallback";
     }
@@ -135,7 +144,7 @@ export class TaskQueueManager {
         const message = result.reason instanceof Error
           ? result.reason.message
           : String(result.reason);
-        // Best-effort: log but don't fail the batch
+        this.logger.error("queue_batch_enqueue_failed", { taskId, error: message });
         try {
           await this.workspace.appendLearning({
             timestamp: new Date().toISOString(),
@@ -174,6 +183,10 @@ export class TaskQueueManager {
 
     // Drain any fallback queue items from a previous Redis outage
     await this.drainFallbackQueue();
+
+    this.logger.info("queue_started", {
+      healthCheckIntervalMs: this.config.healthCheckIntervalMs,
+    });
   }
 
   /**
@@ -190,6 +203,7 @@ export class TaskQueueManager {
 
     await this.worker.close();
     await this.queue.close();
+    this.logger.info("queue_stopped");
   }
 
   /**
@@ -325,8 +339,13 @@ export class TaskQueueManager {
       const typedJob = job as { data: QueueJobData };
       const enqueueTime = this.enqueueTimestamps.get(typedJob.data.taskId);
       if (enqueueTime) {
-        this.workerLatencies.push(Date.now() - enqueueTime);
+        const latencyMs = Date.now() - enqueueTime;
+        this.workerLatencies.push(latencyMs);
         this.enqueueTimestamps.delete(typedJob.data.taskId);
+        this.logger.debug("queue_job_active", {
+          taskId: typedJob.data.taskId,
+          latencyMs,
+        });
         // Keep only last 100 latency samples
         if (this.workerLatencies.length > 100) {
           this.workerLatencies.shift();
@@ -354,6 +373,11 @@ export class TaskQueueManager {
       if (!jobResult.routingAction) return;
 
       const action = jobResult.routingAction;
+
+      this.logger.info("queue_job_completed", {
+        routingAction: action.type,
+        followUpTasks: action.type === "enqueue_tasks" ? action.tasks.length : 0,
+      });
 
       switch (action.type) {
         case "enqueue_tasks":
@@ -400,7 +424,14 @@ export class TaskQueueManager {
       this.failureTracker.recordFailure(taskId, pipelineId);
 
       // Check for cascading failure — pause if threshold reached
-      if (this.failureTracker.shouldPause(pipelineId)) {
+      const shouldPause = this.failureTracker.shouldPause(pipelineId);
+      this.logger.error("queue_job_failed", {
+        taskId,
+        pipelineId,
+        error: error instanceof Error ? error.message : String(error),
+        shouldPause,
+      });
+      if (shouldPause) {
         await this.worker.pause();
       }
 
@@ -451,6 +482,7 @@ export class TaskQueueManager {
     if (await this.fallbackQueue.isEmpty()) return;
 
     const jobs = await this.fallbackQueue.drain();
+    this.logger.info("queue_fallback_drain", { count: jobs.length });
     let failedIndex = -1;
 
     for (let i = 0; i < jobs.length; i++) {
@@ -469,6 +501,10 @@ export class TaskQueueManager {
         });
       } catch {
         // Redis went down again — re-enqueue this job and all remaining
+        this.logger.warn("queue_fallback_drain_redis_down", {
+          processedCount: i,
+          remainingCount: jobs.length - i,
+        });
         failedIndex = i;
         break;
       }

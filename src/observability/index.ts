@@ -2,6 +2,7 @@
 export {
   createLogger,
   BufferLogger,
+  NULL_LOGGER,
   DEFAULT_LOGGER_CONFIG,
   LOG_LEVELS,
   LOG_FORMATS,

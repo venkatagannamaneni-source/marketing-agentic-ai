@@ -17,6 +17,8 @@ import type {
 } from "./types.ts";
 import { PipelineError } from "./types.ts";
 import { runWithConcurrency } from "./concurrency.ts";
+import { NULL_LOGGER } from "../observability/logger.ts";
+import type { Logger } from "../observability/logger.ts";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -26,11 +28,16 @@ const DEFAULT_MAX_CONCURRENCY = 3;
 // ── Sequential Pipeline Engine ──────────────────────────────────────────────
 
 export class SequentialPipelineEngine {
+  private readonly logger: Logger;
+
   constructor(
     private readonly factory: PipelineFactory,
     private readonly executor: AgentExecutor,
     private readonly workspace: WorkspaceManager,
-  ) {}
+    logger?: Logger,
+  ) {
+    this.logger = (logger ?? NULL_LOGGER).child({ module: "pipeline" });
+  }
 
   /**
    * Execute a pipeline definition step-by-step.
@@ -45,9 +52,17 @@ export class SequentialPipelineEngine {
     const startTime = Date.now();
     const stepResults: StepResult[] = [];
 
+    this.logger.debug("pipeline_execute_started", {
+      pipelineId: definition.id,
+      runId: run.id,
+      stepCount: definition.steps.length,
+      runStatus: run.status,
+    });
+
     // ── Validation ──────────────────────────────────────────────────────
 
     if (definition.steps.length === 0) {
+      this.logger.error("pipeline_validation_failed", { runId: run.id, reason: "no_steps" });
       this.updateRunStatus(run, "failed", config);
       run.completedAt = new Date().toISOString();
       return this.buildPipelineResult(
@@ -63,6 +78,7 @@ export class SequentialPipelineEngine {
     if (!STARTABLE_STATUSES.has(run.status)) {
       // Don't mutate run.status — it's already in a terminal state (completed/failed/running)
       // and overwriting it would lose the original state information
+      this.logger.error("pipeline_validation_failed", { runId: run.id, reason: `status_${run.status}` });
       return this.buildPipelineResult(
         run,
         definition,
@@ -98,6 +114,7 @@ export class SequentialPipelineEngine {
       ) {
         // Check cancellation before each step
         if (config.signal?.aborted) {
+          this.logger.warn("pipeline_cancelled", { runId: run.id, stepIndex });
           run.completedAt = new Date().toISOString();
           this.updateRunStatus(run, "cancelled", config);
           return this.buildPipelineResult(
@@ -118,6 +135,12 @@ export class SequentialPipelineEngine {
         const step = definition.steps[stepIndex]!;
         run.currentStepIndex = stepIndex;
 
+        this.logger.debug("pipeline_step_dispatched", {
+          runId: run.id,
+          stepIndex,
+          stepType: step.type,
+        });
+
         // Dispatch by step type
         const stepResult = await this.executeStep(
           step,
@@ -133,6 +156,11 @@ export class SequentialPipelineEngine {
 
         // Handle step outcome
         if (stepResult.status === "failed") {
+          this.logger.error("pipeline_step_failed", {
+            runId: run.id,
+            stepIndex,
+            error: stepResult.error?.message,
+          });
           run.completedAt = new Date().toISOString();
           this.updateRunStatus(run, "failed", config);
           return this.buildPipelineResult(
@@ -193,6 +221,15 @@ export class SequentialPipelineEngine {
 
     run.completedAt = new Date().toISOString();
     this.updateRunStatus(run, "completed", config);
+
+    this.logger.info("pipeline_completed", {
+      pipelineId: definition.id,
+      runId: run.id,
+      status: "completed",
+      totalDurationMs: Date.now() - startTime,
+      stepsCompleted: stepResults.length,
+    });
+
     return this.buildPipelineResult(
       run,
       definition,
@@ -521,8 +558,12 @@ export class SequentialPipelineEngine {
     run.status = status;
     try {
       config.onStatusChange?.(run);
-    } catch {
-      // Best-effort: don't let callback errors break the pipeline
+    } catch (err: unknown) {
+      this.logger.warn("pipeline_callback_error", {
+        callback: "onStatusChange",
+        runId: run.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -532,8 +573,12 @@ export class SequentialPipelineEngine {
   ): void {
     try {
       config.onStepComplete?.(stepResult);
-    } catch {
-      // Best-effort: don't let callback errors break the pipeline
+    } catch (err: unknown) {
+      this.logger.warn("pipeline_callback_error", {
+        callback: "onStepComplete",
+        stepIndex: stepResult.stepIndex,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

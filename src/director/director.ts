@@ -1,4 +1,6 @@
 import type { WorkspaceManager } from "../workspace/workspace-manager.ts";
+import { NULL_LOGGER } from "../observability/logger.ts";
+import type { Logger } from "../observability/logger.ts";
 import type { SkillName } from "../types/agent.ts";
 import { SKILL_SQUAD_MAP, FOUNDATION_SKILL } from "../types/agent.ts";
 import type { Priority, Task } from "../types/task.ts";
@@ -45,6 +47,7 @@ export function generateGoalId(): string {
 
 export class MarketingDirector {
   private readonly config: DirectorConfig;
+  private readonly logger: Logger;
   private readonly goalDecomposer: GoalDecomposer;
   private readonly pipelineFactory: PipelineFactory;
   private readonly reviewEngine: ReviewEngine;
@@ -60,12 +63,14 @@ export class MarketingDirector {
     client?: ClaudeClient,
     executorConfig?: ExecutorConfig,
     humanReviewManager?: HumanReviewManager,
+    logger?: Logger,
   ) {
     this.config = { ...DEFAULT_DIRECTOR_CONFIG, ...config };
+    this.logger = (logger ?? NULL_LOGGER).child({ module: "director" });
     this.client = client;
     this.executorConfig = executorConfig;
     if (client && executorConfig) {
-      this.executor = new AgentExecutor(client, workspace, executorConfig);
+      this.executor = new AgentExecutor(client, workspace, executorConfig, this.logger);
     }
     this.humanReviewManager = humanReviewManager;
     this.goalDecomposer = new GoalDecomposer(PIPELINE_TEMPLATES);
@@ -125,6 +130,13 @@ export class MarketingDirector {
 
     await this.workspace.writeGoal(goal);
 
+    this.logger.info("director_goal_created", {
+      goalId: goal.id,
+      category,
+      priority: goal.priority,
+      learningsCount: (metadata.relevantLearnings as unknown[] | undefined)?.length ?? 0,
+    });
+
     return goal;
   }
 
@@ -141,7 +153,13 @@ export class MarketingDirector {
    */
   decomposeGoal(goal: Goal): GoalPlan {
     const routing = this.routeGoal(goal.category);
-    return this.goalDecomposer.decompose(goal, routing);
+    const plan = this.goalDecomposer.decompose(goal, routing);
+    this.logger.debug("director_goal_decomposed", {
+      goalId: goal.id,
+      phaseCount: plan.phases.length,
+      skills: plan.phases.flatMap((p: GoalPhase) => p.skills),
+    });
+    return plan;
   }
 
   /**
@@ -176,6 +194,11 @@ export class MarketingDirector {
     for (const task of tasks) {
       await this.workspace.writeTask(task);
     }
+
+    this.logger.info("director_tasks_planned", {
+      goalId: goal.id,
+      taskCount: tasks.length,
+    });
 
     return tasks;
   }
@@ -254,6 +277,13 @@ export class MarketingDirector {
     // Apply decision side effects
     await this.applyDecision(taskId, decision);
 
+    this.logger.info("director_task_reviewed", {
+      taskId,
+      verdict: decision.review?.verdict,
+      action: decision.action,
+      findingsCount: decision.review?.findings.length ?? 0,
+    });
+
     return decision;
   }
 
@@ -303,6 +333,13 @@ export class MarketingDirector {
 
     const totalCost = execution.metadata.estimatedCost + reviewCost;
 
+    this.logger.info("director_task_executed_and_reviewed", {
+      taskId,
+      executionCost: execution.metadata.estimatedCost,
+      reviewCost,
+      totalCost,
+    });
+
     return { execution, decision, totalCost };
   }
 
@@ -337,6 +374,13 @@ export class MarketingDirector {
     };
     const newStatus = statusMap[decision.action];
     await this.workspace.updateTaskStatus(taskId, newStatus);
+
+    this.logger.debug("director_decision_applied", {
+      taskId,
+      action: decision.action,
+      newStatus,
+      followUpTasks: decision.nextTasks.length,
+    });
 
     // Append learning if present
     if (decision.learning) {

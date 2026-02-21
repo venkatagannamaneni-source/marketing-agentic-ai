@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import {
   createLogger,
   BufferLogger,
+  NULL_LOGGER,
   DEFAULT_LOGGER_CONFIG,
   type Logger,
   type LogLevel,
@@ -286,5 +287,55 @@ describe("DEFAULT_LOGGER_CONFIG", () => {
 
   it("has no base bindings by default", () => {
     expect(DEFAULT_LOGGER_CONFIG.base).toBeUndefined();
+  });
+});
+
+// ── NULL_LOGGER Tests ────────────────────────────────────────────────────────
+
+describe("NULL_LOGGER", () => {
+  it("is a valid Logger instance (all methods exist)", () => {
+    expect(NULL_LOGGER.trace).toBeFunction();
+    expect(NULL_LOGGER.debug).toBeFunction();
+    expect(NULL_LOGGER.info).toBeFunction();
+    expect(NULL_LOGGER.warn).toBeFunction();
+    expect(NULL_LOGGER.error).toBeFunction();
+    expect(NULL_LOGGER.fatal).toBeFunction();
+    expect(NULL_LOGGER.child).toBeFunction();
+  });
+
+  it("child() returns itself (singleton)", () => {
+    const child = NULL_LOGGER.child({ module: "test" });
+    expect(child).toBe(NULL_LOGGER);
+  });
+
+  it("nested child() calls all return the same instance", () => {
+    const child1 = NULL_LOGGER.child({ module: "a" });
+    const child2 = child1.child({ module: "b" });
+    const child3 = child2.child({ module: "c" });
+    expect(child1).toBe(NULL_LOGGER);
+    expect(child2).toBe(NULL_LOGGER);
+    expect(child3).toBe(NULL_LOGGER);
+  });
+
+  it("calling all methods does not throw", () => {
+    expect(() => {
+      NULL_LOGGER.trace("msg", { key: "value" });
+      NULL_LOGGER.debug("msg");
+      NULL_LOGGER.info("msg", {});
+      NULL_LOGGER.warn("msg");
+      NULL_LOGGER.error("msg", { error: "test" });
+      NULL_LOGGER.fatal("msg");
+    }).not.toThrow();
+  });
+
+  it("calling methods with no data argument does not throw", () => {
+    expect(() => {
+      NULL_LOGGER.trace("msg");
+      NULL_LOGGER.debug("msg");
+      NULL_LOGGER.info("msg");
+      NULL_LOGGER.warn("msg");
+      NULL_LOGGER.error("msg");
+      NULL_LOGGER.fatal("msg");
+    }).not.toThrow();
   });
 });
