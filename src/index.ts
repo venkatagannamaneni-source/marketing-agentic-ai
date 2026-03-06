@@ -186,6 +186,8 @@ export type {
   DirectorConfig,
   SemanticReviewResult,
   QualityReviewResult,
+  ReviewDepth,
+  SemanticReviewConfig,
 } from "./director/index.ts";
 
 export {
@@ -194,6 +196,7 @@ export {
   ESCALATION_REASONS,
   BUDGET_LEVELS,
   DEFAULT_DIRECTOR_CONFIG,
+  DEFAULT_SEMANTIC_REVIEW_CONFIG,
   DIRECTOR_SYSTEM_PROMPT,
   buildDirectorPrompt,
   routeGoal,

@@ -25,6 +25,7 @@ import { DIRECTOR_SYSTEM_PROMPT, buildDirectorPrompt } from "./system-prompt.ts"
 import { GoalDecomposer } from "./goal-decomposer.ts";
 import { PipelineFactory } from "./pipeline-factory.ts";
 import { ReviewEngine } from "./review-engine.ts";
+import type { SemanticReviewConfig } from "./review-engine.ts";
 import { EscalationEngine } from "./escalation.ts";
 import { routeGoal } from "./squad-router.ts";
 import { parseLearnings } from "../workspace/markdown.ts";
@@ -298,8 +299,13 @@ export class MarketingDirector {
   }
 
   /**
-   * Execute a task via the Agent Executor, then run semantic review via Claude Opus.
+   * Execute a task via the Agent Executor, then run semantic review via Claude.
    * Requires ClaudeClient and ExecutorConfig to be provided at construction time.
+   *
+   * Accepts an optional SemanticReviewConfig to control review depth:
+   * - "quick": Structural only (no API call for review)
+   * - "standard": Structural + Sonnet review (cost-effective)
+   * - "deep": Structural + Opus review with SKILL.md context (most thorough)
    *
    * Returns the execution result, director decision, and total cost
    * (execution + semantic review — EC-4).
@@ -307,6 +313,7 @@ export class MarketingDirector {
   async executeAndReviewTask(
     taskId: string,
     budgetState?: BudgetState,
+    reviewConfig?: SemanticReviewConfig,
   ): Promise<{
     execution: ExecutionResult;
     decision: DirectorDecision;
@@ -336,6 +343,7 @@ export class MarketingDirector {
         execution.content,
         existingReviews,
         budgetState,
+        reviewConfig,
       );
 
     // Apply decision side effects
