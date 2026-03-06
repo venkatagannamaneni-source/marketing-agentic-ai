@@ -24,6 +24,7 @@ import type { ClaudeClient } from "../agents/claude-client.ts";
 import { MODEL_MAP, estimateCost } from "../agents/claude-client.ts";
 import type { QualityScore, SkillQualityCriteria } from "../types/quality.ts";
 import type { QualityScorer } from "./quality-scorer.ts";
+import { getSkillCriteria } from "./quality-criteria.ts";
 
 // ── Review Depth ────────────────────────────────────────────────────────────
 
@@ -58,6 +59,8 @@ export interface SemanticReviewResult {
   readonly reviewCost: number;
   /** The review depth that was actually used (may differ from requested if client unavailable) */
   readonly reviewDepth: ReviewDepth;
+  /** Dimensional quality score, present when a QualityScorer is wired in */
+  readonly qualityScore?: QualityScore;
 }
 
 // ── Review Engine ────────────────────────────────────────────────────────────
@@ -338,10 +341,19 @@ export class ReviewEngine {
       reviewIndex,
     );
 
+    // 8. Quality scoring (automatic when QualityScorer is wired in)
+    let qualityScore: QualityScore | undefined;
+    if (this.qualityScorer) {
+      const criteria = getSkillCriteria(task.to);
+      // Use structural scoring (free) — semantic review already happened above
+      qualityScore = this.qualityScorer.scoreStructural(task, outputContent, criteria);
+    }
+
     return {
       decision,
       reviewCost: semanticResult.cost,
       reviewDepth: config.depth,
+      qualityScore,
     };
   }
 

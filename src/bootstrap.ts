@@ -12,6 +12,7 @@ import { AnthropicClaudeClient } from "./agents/claude-client.ts";
 import { AgentExecutor } from "./agents/executor.ts";
 import type { ExecutorConfig } from "./agents/executor.ts";
 import { MarketingDirector } from "./director/director.ts";
+import { QualityScorer } from "./director/quality-scorer.ts";
 import { SequentialPipelineEngine } from "./pipeline/pipeline-engine.ts";
 import { PipelineFactory } from "./director/pipeline-factory.ts";
 import { PIPELINE_TEMPLATES } from "./agents/registry.ts";
@@ -143,7 +144,10 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     },
   });
 
-  // 8. Marketing Director
+  // 8. Quality Scorer (dimensional quality scoring for reviewed outputs)
+  const qualityScorer = new QualityScorer(client);
+
+  // 9. Marketing Director
   const director = new MarketingDirector(
     workspace,
     {
@@ -159,6 +163,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     undefined,
     logger,
     registry,
+    qualityScorer,
   );
 
   // 9. Pipeline Engine

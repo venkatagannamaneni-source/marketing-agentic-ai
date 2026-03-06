@@ -26,6 +26,7 @@ import { GoalDecomposer } from "./goal-decomposer.ts";
 import { PipelineFactory } from "./pipeline-factory.ts";
 import { ReviewEngine } from "./review-engine.ts";
 import type { SemanticReviewConfig } from "./review-engine.ts";
+import type { QualityScorer } from "./quality-scorer.ts";
 import { EscalationEngine } from "./escalation.ts";
 import { routeGoal } from "./squad-router.ts";
 import { parseLearnings } from "../workspace/markdown.ts";
@@ -70,6 +71,7 @@ export class MarketingDirector {
     humanReviewManager?: HumanReviewManager,
     logger?: Logger,
     registry?: SkillRegistry,
+    qualityScorer?: QualityScorer,
   ) {
     this.config = { ...DEFAULT_DIRECTOR_CONFIG, ...config };
     this.logger = (logger ?? NULL_LOGGER).child({ module: "director" });
@@ -86,7 +88,7 @@ export class MarketingDirector {
       : DIRECTOR_SYSTEM_PROMPT;
     this.goalDecomposer = new GoalDecomposer(PIPELINE_TEMPLATES, registry);
     this.pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES, registry);
-    this.reviewEngine = new ReviewEngine(this.config, client);
+    this.reviewEngine = new ReviewEngine(this.config, client, qualityScorer);
     this.escalationEngine = new EscalationEngine(this.config);
   }
 
