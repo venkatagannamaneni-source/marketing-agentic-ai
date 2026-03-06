@@ -543,7 +543,7 @@ describe.skipIf(!HAS_API_KEY)("Integration: Phase 2 — Runtime Engine", () => {
       console.log(`[2.3] ${template.name}: ${definition.steps.length} steps`);
     }
 
-    expect(PIPELINE_TEMPLATES.length).toBe(8);
+    expect(PIPELINE_TEMPLATES.length).toBe(9);
   });
 
   // ── 2.4: Budget and Escalation ──────────────────────────────────────────

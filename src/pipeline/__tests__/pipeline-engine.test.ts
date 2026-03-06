@@ -21,6 +21,8 @@ import {
   createSingleStepDefinition,
   createParallelStepDefinition,
   createReviewStepDefinition,
+  createAgentReviewChainDefinition,
+  createAgentReviewOnlyDefinition,
   createTestRun,
   createConcurrencyTrackingClient,
   type TestWorkspace,
@@ -1070,5 +1072,220 @@ describe("SequentialPipelineEngine — concurrency control", () => {
       (r) => r.status === "completed",
     ).length;
     expect(completedCount).toBeLessThan(4);
+  });
+});
+
+// ── Multi-Pass Agent Review Chains ──────────────────────────────────────────
+
+describe("SequentialPipelineEngine — multi-pass agent review chains", () => {
+  it("executes agent reviewer step (copy-editing reviews copywriting)", async () => {
+    const definition = createAgentReviewOnlyDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(definition, run, defaultConfig());
+
+    expect(result.status).toBe("completed");
+    expect(result.stepResults).toHaveLength(2);
+    // Step 0: copywriting (sequential)
+    expect(result.stepResults[0]!.status).toBe("completed");
+    expect(result.stepResults[0]!.tasks[0]!.to).toBe("copywriting");
+    // Step 1: copy-editing (agent review) — executes instead of pausing
+    expect(result.stepResults[1]!.status).toBe("completed");
+    expect(result.stepResults[1]!.tasks[0]!.to).toBe("copy-editing");
+    // 2 API calls total (copywriting + copy-editing review)
+    expect(client.calls).toHaveLength(2);
+    expect(run.status).toBe("completed");
+  });
+
+  it("wires copywriting output as input to agent reviewer", async () => {
+    const definition = createAgentReviewOnlyDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(definition, run, defaultConfig());
+
+    // The review task should reference the copywriting output
+    const reviewTask = result.stepResults[1]!.tasks[0]!;
+    const inputPaths = reviewTask.inputs.map((i) => i.path);
+    const hasUpstreamRef = inputPaths.some((p) => p.includes("copywriting"));
+    expect(hasUpstreamRef).toBe(true);
+    // Input description should indicate it's for review
+    const reviewInput = reviewTask.inputs.find((i) => i.path.includes("copywriting"));
+    expect(reviewInput?.description).toBe("Output from previous step to review");
+  });
+
+  it("executes full review chain: copywriting → copy-editing → page-cro → director pause", async () => {
+    const definition = createAgentReviewChainDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(definition, run, defaultConfig());
+
+    // Should pause at the director review step
+    expect(result.status).toBe("paused");
+    expect(result.stepResults).toHaveLength(4);
+    // Step 0: copywriting executes
+    expect(result.stepResults[0]!.status).toBe("completed");
+    expect(result.stepResults[0]!.tasks[0]!.to).toBe("copywriting");
+    // Step 1: copy-editing agent review executes
+    expect(result.stepResults[1]!.status).toBe("completed");
+    expect(result.stepResults[1]!.tasks[0]!.to).toBe("copy-editing");
+    // Step 2: page-cro agent review executes
+    expect(result.stepResults[2]!.status).toBe("completed");
+    expect(result.stepResults[2]!.tasks[0]!.to).toBe("page-cro");
+    // Step 3: director review pauses
+    expect(result.stepResults[3]!.status).toBe("paused");
+
+    // 3 API calls (copywriting + copy-editing + page-cro — director doesn't call API)
+    expect(client.calls).toHaveLength(3);
+    expect(run.status).toBe("paused");
+  });
+
+  it("chains output through agent review steps", async () => {
+    const definition = createAgentReviewChainDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(definition, run, defaultConfig());
+
+    // Copy-editing (step 1) output should be input to page-cro (step 2)
+    const pageCroTask = result.stepResults[2]!.tasks[0]!;
+    const pageCroInputPaths = pageCroTask.inputs.map((i) => i.path);
+    const hasUpstreamRef = pageCroInputPaths.some((p) => p.includes("copy-editing"));
+    expect(hasUpstreamRef).toBe(true);
+  });
+
+  it("records all agent review task IDs on the run", async () => {
+    const definition = createAgentReviewChainDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    await engine.execute(definition, run, defaultConfig());
+
+    // 3 tasks: copywriting + copy-editing review + page-cro review (director pauses, no task)
+    expect(run.taskIds).toHaveLength(3);
+    expect(run.taskIds[0]).toContain("copywriting");
+    expect(run.taskIds[1]).toContain("copy-editing");
+    expect(run.taskIds[2]).toContain("page-cro");
+  });
+
+  it("tags review tasks with 'review' tag", async () => {
+    const definition = createAgentReviewOnlyDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(definition, run, defaultConfig());
+
+    const reviewTask = result.stepResults[1]!.tasks[0]!;
+    expect(reviewTask.tags).toContain("review");
+  });
+
+  it("sets review task metadata.isReview to true", async () => {
+    const definition = createAgentReviewOnlyDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(definition, run, defaultConfig());
+
+    const reviewTask = result.stepResults[1]!.tasks[0]!;
+    expect(reviewTask.metadata.isReview).toBe(true);
+  });
+
+  it("fails pipeline when agent reviewer fails", async () => {
+    let callCount = 0;
+    client = new MockClaudeClient((_params: ClaudeMessageParams) => {
+      callCount++;
+      if (callCount === 2) {
+        // Fail on the review step
+        throw new ExecutionError("Review API error", "API_ERROR", "", false);
+      }
+      return {
+        content: "Generated output",
+        inputTokens: 100,
+        outputTokens: 200,
+        stopReason: "end_turn",
+      };
+    });
+    executor = new AgentExecutor(client, tw.workspace, executorConfig);
+    engine = new SequentialPipelineEngine(factory, executor, tw.workspace);
+
+    const definition = createAgentReviewOnlyDefinition();
+    const run = createTestRun({ pipelineId: definition.id });
+
+    const result = await engine.execute(definition, run, defaultConfig());
+
+    expect(result.status).toBe("failed");
+    expect(result.stepResults[0]!.status).toBe("completed");
+    expect(result.stepResults[1]!.status).toBe("failed");
+    expect(result.error?.code).toBe("STEP_FAILED");
+  });
+
+  it("resumes review chain after director pause", async () => {
+    // Pipeline with agent review + director review + final step
+    const definition = createTestDefinition({
+      id: "resume-review-chain",
+      steps: [
+        { type: "sequential", skill: "copywriting" as any },
+        { type: "review", reviewer: "copy-editing" as any },
+        { type: "review", reviewer: "director" as const },
+        { type: "sequential", skill: "schema-markup" as any },
+      ],
+    });
+    const run = createTestRun({ pipelineId: definition.id });
+
+    // First run: copywriting + copy-editing review execute, then pauses at director
+    const pausedResult = await engine.execute(definition, run, defaultConfig());
+    expect(pausedResult.status).toBe("paused");
+    expect(pausedResult.stepResults).toHaveLength(3);
+    expect(client.calls).toHaveLength(2); // copywriting + copy-editing
+
+    // Collect output paths from last completed step
+    const lastOutputPaths = pausedResult.stepResults[1]!.outputPaths;
+
+    // Resume: advances past director review step
+    const resumedResult = await engine.execute(
+      definition,
+      run,
+      defaultConfig({ initialInputPaths: lastOutputPaths }),
+    );
+
+    expect(resumedResult.status).toBe("completed");
+    expect(resumedResult.stepResults).toHaveLength(1); // only schema-markup
+    expect(resumedResult.stepResults[0]!.tasks[0]!.to).toBe("schema-markup");
+    expect(run.status).toBe("completed");
+    // 3 total API calls: 2 from first run + 1 from resumed run
+    expect(client.calls).toHaveLength(3);
+  });
+});
+
+// ── Copywriting Review Chain Template Integration ────────────────────────────
+
+describe("SequentialPipelineEngine — Copywriting Review Chain template", () => {
+  it("runs the Copywriting Review Chain template through agent reviews to director pause", async () => {
+    const { definition, run } = factory.instantiate(
+      "Copywriting Review Chain",
+      "Create polished landing page copy",
+      "goal-review-chain-001",
+    );
+
+    const result = await engine.execute(
+      definition,
+      run,
+      defaultConfig({
+        goalDescription: "Create polished landing page copy",
+        priority: "P1",
+      }),
+    );
+
+    // Should pause at the director review step (last step)
+    expect(result.status).toBe("paused");
+    // 4 steps: copywriting + copy-editing review + page-cro review + director pause
+    expect(result.stepResults).toHaveLength(4);
+    expect(result.stepResults[0]!.status).toBe("completed");
+    expect(result.stepResults[1]!.status).toBe("completed");
+    expect(result.stepResults[2]!.status).toBe("completed");
+    expect(result.stepResults[3]!.status).toBe("paused");
+    // 3 API calls (agent steps only, director pauses)
+    expect(client.calls).toHaveLength(3);
+
+    // Verify task chain
+    expect(run.taskIds).toHaveLength(3);
+    expect(run.taskIds[0]).toContain("copywriting");
+    expect(run.taskIds[1]).toContain("copy-editing");
+    expect(run.taskIds[2]).toContain("page-cro");
   });
 });

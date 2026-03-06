@@ -228,7 +228,7 @@ describe("ADVERSARIAL: Pipeline factory edge cases", () => {
     expect(result.tasks[0]!.pipelineId).toBe(result.run.id);
   });
 
-  it("all 8 pipeline templates can be instantiated", async () => {
+  it("all 9 pipeline templates can be instantiated", async () => {
     const templates = [
       "Content Production",
       "Page Launch",
@@ -238,6 +238,7 @@ describe("ADVERSARIAL: Pipeline factory edge cases", () => {
       "Retention Sprint",
       "SEO Cycle",
       "Outreach Campaign",
+      "Copywriting Review Chain",
     ];
     for (const name of templates) {
       const result = await director.startPipeline(name, `Test ${name}`);

@@ -81,10 +81,16 @@ export function getDownstreamSkills(skill: string): readonly string[] {
 // Built-in pipelines from PROJECT_PROPOSAL.md Section 4.
 // Steps are either a single SkillName (sequential) or an array (parallel).
 
+export interface ReviewStepTemplate {
+  readonly review: string;
+}
+
+export type PipelineTemplateStep = string | readonly string[] | ReviewStepTemplate;
+
 export interface PipelineTemplate {
   readonly name: string;
   readonly description: string;
-  readonly steps: readonly (string | readonly string[])[];
+  readonly steps: readonly PipelineTemplateStep[];
   readonly trigger: string;
   readonly defaultPriority: Priority;
 }
@@ -167,5 +173,18 @@ export const PIPELINE_TEMPLATES: readonly PipelineTemplate[] = [
     steps: ["cold-email", "ab-test-setup", "analytics-tracking"],
     trigger: "new prospect list available",
     defaultPriority: "P2",
+  },
+  {
+    name: "Copywriting Review Chain",
+    description:
+      "Multi-pass review pipeline: copywriting → copy-editing review → page-cro review → director approval",
+    steps: [
+      "copywriting",
+      { review: "copy-editing" },
+      { review: "page-cro" },
+      { review: "director" },
+    ],
+    trigger: "manual",
+    defaultPriority: "P1",
   },
 ];

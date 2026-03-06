@@ -22,7 +22,7 @@ describe("PipelineFactory", () => {
       expect(template).toBeUndefined();
     });
 
-    it("finds all 8 pipeline templates", () => {
+    it("finds all 9 pipeline templates", () => {
       const names = [
         "Content Production",
         "Page Launch",
@@ -32,6 +32,7 @@ describe("PipelineFactory", () => {
         "Retention Sprint",
         "SEO Cycle",
         "Outreach Campaign",
+        "Copywriting Review Chain",
       ];
       for (const name of names) {
         expect(factory.findTemplate(name)).not.toBeUndefined();
