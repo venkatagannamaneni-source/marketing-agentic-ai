@@ -3,23 +3,179 @@
 # Declare which external tools agents can access.
 # Each tool is bound to specific skills — only authorized skills can invoke it.
 #
-# To add a tool:
-#   1. Add an entry under `tools:` below
-#   2. Restart the system
+# Provider types:
+#   - mcp: Connects to an MCP server subprocess (Phase 4+)
+#   - stub: Returns placeholder data (development/testing)
+#   - rest: Direct REST API calls (future)
 #
-# Example:
-#   ga4:
-#     description: "Google Analytics 4 — read traffic and conversion data"
-#     provider: stub
-#     skills: [analytics-tracking, ab-test-setup]
-#     actions:
-#       - name: query-events
-#         description: "Query GA4 event data"
-#         parameters:
-#           type: object
-#           properties:
-#             start_date: { type: string }
-#             end_date: { type: string }
-#           required: [start_date, end_date]
+# Credentials are read from environment variables referenced by credentials_env.
+# See docs/next-steps.md Phase 4 for setup instructions.
 
-tools: {}
+tools:
+  ga4:
+    description: "Google Analytics 4 — read traffic, conversion, and engagement data"
+    provider: mcp
+    mcp_server: ".agents/mcp-servers/ga4-server/index.ts"
+    credentials_env: "GOOGLE_OAUTH_CREDENTIALS"
+    enabled: true
+    skills: [analytics-tracking, ab-test-setup, seo-audit]
+    rate_limit:
+      max_per_minute: 10
+    actions:
+      - name: query-report
+        description: "Run a GA4 report query with metrics and dimensions over a date range"
+        parameters:
+          type: object
+          properties:
+            property_id: { type: string, description: "GA4 property ID (e.g. 'properties/12345')" }
+            start_date: { type: string, description: "Start date (YYYY-MM-DD)" }
+            end_date: { type: string, description: "End date (YYYY-MM-DD)" }
+            metrics: { type: array, description: "Metrics to query (e.g. ['sessions', 'conversions', 'bounceRate'])" }
+            dimensions: { type: array, description: "Dimensions to group by (e.g. ['pagePath', 'source'])" }
+          required: [property_id, start_date, end_date, metrics]
+      - name: get-realtime
+        description: "Get real-time active users and events"
+        parameters:
+          type: object
+          properties:
+            property_id: { type: string, description: "GA4 property ID" }
+          required: [property_id]
+      - name: list-events
+        description: "List custom event definitions and custom dimensions/metrics"
+        parameters:
+          type: object
+          properties:
+            property_id: { type: string, description: "GA4 property ID" }
+          required: [property_id]
+      - name: get-conversion-events
+        description: "List events marked as conversions (key events)"
+        parameters:
+          type: object
+          properties:
+            property_id: { type: string, description: "GA4 property ID" }
+          required: [property_id]
+
+  search-console:
+    description: "Google Search Console — read search performance, index coverage, and rankings"
+    provider: mcp
+    mcp_server: ".agents/mcp-servers/search-console-server/index.ts"
+    credentials_env: "GOOGLE_OAUTH_CREDENTIALS"
+    enabled: true
+    skills: [seo-audit, analytics-tracking, content-strategy]
+    rate_limit:
+      max_per_minute: 200
+    actions:
+      - name: query-search-analytics
+        description: "Query search performance data (clicks, impressions, CTR, position)"
+        parameters:
+          type: object
+          properties:
+            site_url: { type: string, description: "Site URL (e.g. 'https://example.com')" }
+            start_date: { type: string, description: "Start date (YYYY-MM-DD)" }
+            end_date: { type: string, description: "End date (YYYY-MM-DD)" }
+            dimensions: { type: array, description: "Dimensions: query, page, country, device, date" }
+            row_limit: { type: number, description: "Max rows returned (default 1000, max 25000)" }
+          required: [site_url, start_date, end_date]
+      - name: get-index-coverage
+        description: "Get index coverage summary — indexed, excluded, and error page counts"
+        parameters:
+          type: object
+          properties:
+            site_url: { type: string, description: "Site URL" }
+          required: [site_url]
+      - name: list-sitemaps
+        description: "List submitted sitemaps and their processing status"
+        parameters:
+          type: object
+          properties:
+            site_url: { type: string, description: "Site URL" }
+          required: [site_url]
+      - name: inspect-url
+        description: "Inspect a specific URL's index status, crawl info, and mobile usability"
+        parameters:
+          type: object
+          properties:
+            site_url: { type: string, description: "Site URL" }
+            inspection_url: { type: string, description: "The specific URL to inspect" }
+          required: [site_url, inspection_url]
+
+  gtm:
+    description: "Google Tag Manager — manage tags, triggers, and variables for tracking deployment"
+    provider: mcp
+    mcp_server: ".agents/mcp-servers/gtm-server/index.ts"
+    credentials_env: "GOOGLE_OAUTH_CREDENTIALS"
+    enabled: true
+    skills: [analytics-tracking]
+    rate_limit:
+      max_per_minute: 5
+    actions:
+      - name: list-tags
+        description: "List all tags in a GTM container workspace"
+        parameters:
+          type: object
+          properties:
+            account_id: { type: string, description: "GTM account ID" }
+            container_id: { type: string, description: "GTM container ID" }
+            workspace_id: { type: string, description: "Workspace ID (default: 'Default Workspace')" }
+          required: [account_id, container_id]
+      - name: create-tag
+        description: "Create a new tag (e.g. GA4 event tag, conversion tag)"
+        parameters:
+          type: object
+          properties:
+            account_id: { type: string, description: "GTM account ID" }
+            container_id: { type: string, description: "GTM container ID" }
+            tag_name: { type: string, description: "Human-readable tag name" }
+            tag_type: { type: string, description: "Tag type (e.g. 'gaawc' for GA4 config, 'gaawe' for GA4 event)" }
+            parameters: { type: array, description: "Tag parameters as key-value pairs" }
+            firing_trigger_ids: { type: array, description: "Trigger IDs that fire this tag" }
+          required: [account_id, container_id, tag_name, tag_type]
+      - name: create-trigger
+        description: "Create a trigger (pageview, click, form submission, custom event, etc.)"
+        parameters:
+          type: object
+          properties:
+            account_id: { type: string, description: "GTM account ID" }
+            container_id: { type: string, description: "GTM container ID" }
+            trigger_name: { type: string, description: "Trigger name" }
+            trigger_type: { type: string, description: "Type: pageview, click, formSubmission, customEvent, etc." }
+            filters: { type: array, description: "Trigger conditions/filters" }
+          required: [account_id, container_id, trigger_name, trigger_type]
+      - name: publish-workspace
+        description: "Publish a GTM workspace — creates a new container version and deploys to production"
+        parameters:
+          type: object
+          properties:
+            account_id: { type: string, description: "GTM account ID" }
+            container_id: { type: string, description: "GTM container ID" }
+            workspace_id: { type: string, description: "Workspace ID to publish" }
+            version_name: { type: string, description: "Name for the published version" }
+          required: [account_id, container_id, workspace_id]
+
+  pagespeed:
+    description: "PageSpeed Insights — run Lighthouse audits for performance, accessibility, SEO, and Core Web Vitals"
+    provider: mcp
+    mcp_server: ".agents/mcp-servers/pagespeed-server/index.ts"
+    credentials_env: "PAGESPEED_API_KEY"
+    enabled: true
+    skills: [seo-audit, page-cro]
+    rate_limit:
+      max_per_minute: 15
+    actions:
+      - name: run-audit
+        description: "Run a full Lighthouse audit on a URL (performance, accessibility, SEO, best practices)"
+        parameters:
+          type: object
+          properties:
+            url: { type: string, description: "URL to audit" }
+            strategy: { type: string, description: "'mobile' or 'desktop' (default: mobile)" }
+            categories: { type: array, description: "Categories: performance, accessibility, seo, best-practices, pwa" }
+          required: [url]
+      - name: get-core-web-vitals
+        description: "Get Core Web Vitals field data (LCP, INP, CLS) from Chrome UX Report"
+        parameters:
+          type: object
+          properties:
+            url: { type: string, description: "URL to check" }
+            form_factor: { type: string, description: "'PHONE', 'DESKTOP', or 'ALL' (default: ALL)" }
+          required: [url]

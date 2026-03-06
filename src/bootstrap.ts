@@ -18,6 +18,10 @@ import { PipelineFactory } from "./director/pipeline-factory.ts";
 import { PIPELINE_TEMPLATES } from "./agents/registry.ts";
 import { SkillRegistry } from "./agents/skill-registry.ts";
 import { ToolRegistry, ToolRegistryError } from "./agents/tool-registry.ts";
+import { EnvCredentialResolver } from "./agents/credential-resolver.ts";
+import { MCPToolProvider } from "./agents/mcp-tool-provider.ts";
+import { ToolRateLimiterRegistry } from "./agents/tool-rate-limiter.ts";
+import { ToolRouter } from "./agents/tool-router.ts";
 import { RoutingRegistry, RoutingRegistryError } from "./director/routing-registry.ts";
 import { ScheduleRegistry, ScheduleRegistryError } from "./scheduler/schedule-registry.ts";
 import { EventRegistry, EventRegistryError } from "./events/event-registry.ts";
@@ -211,8 +215,14 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     maxToolIterations: config.maxToolIterations,
   };
 
-  // 6. Agent Executor
-  const executor = new AgentExecutor(client, workspace, executorConfig, logger, toolRegistry);
+  // 6. Tool infrastructure (credential resolver, MCP provider, rate limiter, router)
+  const credentialResolver = new EnvCredentialResolver(logger);
+  const mcpProvider = new MCPToolProvider(toolRegistry, credentialResolver, logger);
+  const rateLimiterRegistry = new ToolRateLimiterRegistry(toolRegistry);
+  const toolRouter = new ToolRouter(toolRegistry, mcpProvider, rateLimiterRegistry, logger);
+
+  // 6b. Agent Executor (with tool router for MCP tool invocations)
+  const executor = new AgentExecutor(client, workspace, executorConfig, logger, toolRegistry, toolRouter);
 
   // 7. Cost Tracker (replaces closure-based budgetProvider)
   const costTracker = new CostTracker({
@@ -406,7 +416,17 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
         });
       }
 
-      // 4. Close Redis connection
+      // 4. Disconnect MCP servers
+      try {
+        await mcpProvider.disconnectAll();
+        logger.info("MCP servers disconnected");
+      } catch (err: unknown) {
+        logger.error("Error disconnecting MCP servers", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      // 5. Close Redis connection
       try {
         await redis.close();
         logger.info("Redis connection closed");

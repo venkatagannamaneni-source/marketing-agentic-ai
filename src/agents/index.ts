@@ -70,6 +70,33 @@ export type {
 } from "./executor.ts";
 export { AgentExecutor, DEFAULT_EXECUTOR_CONFIG } from "./executor.ts";
 
+// ── Credential Resolver ──────────────────────────────────────────────────
+export {
+  EnvCredentialResolver,
+  CredentialError,
+  type CredentialResolver,
+  type ResolvedCredential,
+  type CredentialType,
+} from "./credential-resolver.ts";
+
+// ── MCP Tool Provider ───────────────────────────────────────────────────
+export {
+  MCPToolProvider,
+  MCPConnectionError,
+  MCPToolError,
+  type MCPToolProviderConfig,
+} from "./mcp-tool-provider.ts";
+
+// ── Tool Rate Limiter ───────────────────────────────────────────────────
+export {
+  TokenBucketRateLimiter,
+  ToolRateLimiterRegistry,
+  RateLimitError,
+} from "./tool-rate-limiter.ts";
+
+// ── Tool Router ─────────────────────────────────────────────────────────
+export { ToolRouter } from "./tool-router.ts";
+
 // ── Pipeline Template Registry ──────────────────────────────────────────
 export {
   PipelineTemplateRegistry,

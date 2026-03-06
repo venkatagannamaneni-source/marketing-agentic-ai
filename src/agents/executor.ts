@@ -16,7 +16,7 @@ import type {
   ClaudeToolResultBlock,
 } from "./claude-client.ts";
 import { MODEL_MAP, estimateCost, ExecutionError } from "./claude-client.ts";
-import type { ToolRegistry } from "./tool-registry.ts";
+import type { ToolRegistry, ToolProvider } from "./tool-registry.ts";
 
 // ── Executable Statuses ─────────────────────────────────────────────────────
 
@@ -89,6 +89,7 @@ export interface ExecutionMetadata {
 export class AgentExecutor {
   private readonly logger: Logger;
   private readonly toolRegistry: ToolRegistry | null;
+  private readonly toolRouter: ToolProvider | null;
 
   constructor(
     private readonly client: ClaudeClient,
@@ -96,9 +97,11 @@ export class AgentExecutor {
     private readonly config: ExecutorConfig,
     logger?: Logger,
     toolRegistry?: ToolRegistry,
+    toolRouter?: ToolProvider,
   ) {
     this.logger = (logger ?? NULL_LOGGER).child({ module: "executor" });
     this.toolRegistry = toolRegistry ?? null;
+    this.toolRouter = toolRouter ?? null;
   }
 
   /**
@@ -387,6 +390,7 @@ export class AgentExecutor {
                 const invocationResult = await this.toolRegistry!.invokeTool(
                   toolUse.name,
                   toolUse.input,
+                  this.toolRouter ?? undefined,
                 );
                 return {
                   record: {
