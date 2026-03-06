@@ -61,5 +61,12 @@ export {
   resolveThreshold,
 } from "./quality-criteria.ts";
 
+// ── Learning Validator ──────────────────────────────────────────────────────
+export { LearningValidator } from "./learning-validator.ts";
+export type {
+  LearningValidationResult,
+  LearningEffectivenessReport,
+} from "./learning-validator.ts";
+
 // ── Marketing Director ───────────────────────────────────────────────────────
 export { MarketingDirector, generateGoalId } from "./director.ts";

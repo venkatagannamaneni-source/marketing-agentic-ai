@@ -188,6 +188,8 @@ export type {
   QualityReviewResult,
   ReviewDepth,
   SemanticReviewConfig,
+  LearningValidationResult,
+  LearningEffectivenessReport,
 } from "./director/index.ts";
 
 export {
@@ -214,6 +216,7 @@ export {
   DEFAULT_SKILL_CRITERIA,
   getSkillCriteria,
   resolveThreshold,
+  LearningValidator,
 } from "./director/index.ts";
 
 // ── Pipeline Engine ──────────────────────────────────────────────────────────
