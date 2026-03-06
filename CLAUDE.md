@@ -4,13 +4,13 @@
 
 A self-operating marketing team — 26 AI agents in 5 squads + a Director, powered by Claude. Agents strategize, create, optimize, measure, and iterate across the full marketing funnel.
 
-## Current State: Phase 1 + 2 Complete, Phases 3-6 Designed
+## Current State: Phases 1-3b Complete, Phase 4 Next
 
-Phase 2 built the 24/7 runtime engine on top of Phase 1's backend. 14 modules, 1472+ tests across 68 files. The system can accept a natural-language goal, decompose it into tasks, execute them through pipelines, schedule recurring work, react to external events, and track costs — all with structured logging and health monitoring.
+Phase 3b completed the platform hardening layer. 14 modules, 1829+ tests across 81 files. The system can accept a natural-language goal, decompose it into tasks, execute them through pipelines, schedule recurring work, react to external events, track costs, perform Claude-powered semantic review with quality scoring, and run revision loops — all driven by YAML configuration with structured logging and health monitoring.
 
-**Remaining roadmap:** Phase 3 (Semantic Review, weeks 9-12) → Phase 4 (30+ MCP Tool Integrations, weeks 13-20) → Phase 5 (Feedback Loops, weeks 21-26) → Phase 6 (Dashboard + SaaS, weeks 27-34).
+**Remaining roadmap:** Phase 4 (30+ MCP Tool Integrations, weeks 15-22) → Phase 5 (Feedback Loops, weeks 23-28) → Phase 6 (Dashboard + SaaS, weeks 29-36).
 
-**Real Claude API integration verified** — 23 tests make live API calls (Haiku model, ~$0.01/test). Full 5-step Content Production pipeline runs end-to-end in ~4 minutes. All 26 skill SKILL.md files load successfully. Director structural review approves real Claude output.
+**Real Claude API integration verified** — 23 tests make live API calls (Haiku model, ~$0.01/test). Full 5-step Content Production pipeline runs end-to-end in ~4 minutes. All 26 skill SKILL.md files load successfully. Director semantic review evaluates real Claude output with quality scoring.
 
 | Module | What it does |
 |--------|-------------|
@@ -29,7 +29,7 @@ Phase 2 built the 24/7 runtime engine on top of Phase 1's backend. 14 modules, 1
 | `src/bootstrap.ts` | Composition root wiring all 14 modules |
 | `src/cli.ts` | CLI entry point (goal, pipeline, daemon modes) |
 
-**Unit tests use mocks** for Claude API and Redis. Real API integration tests opt-in via `ANTHROPIC_API_KEY` env var (`describe.skipIf`). Director reviews are structural only (semantic review is Phase 3).
+**Unit tests use mocks** for Claude API and Redis. Real API integration tests opt-in via `ANTHROPIC_API_KEY` env var (`describe.skipIf`). Director reviews use Claude-powered semantic evaluation with quality scoring.
 
 See [docs/phase-2-status.md](docs/phase-2-status.md) for the full honest assessment.
 
@@ -66,7 +66,7 @@ MARKETING DIRECTOR (Supervisor — Claude Opus)
 
 ```bash
 bun install          # Install deps
-bun test             # Run 1472+ tests (mock tests always run; real API tests need ANTHROPIC_API_KEY)
+bun test             # Run 1829+ tests (mock tests always run; real API tests need ANTHROPIC_API_KEY)
 bunx tsc --noEmit    # Type check
 ```
 
@@ -106,7 +106,7 @@ Skill invocation (manual mode):
 2. Read the relevant SKILL.md before producing marketing output
 3. Check `references/*.md` in skill directories for templates and examples
 4. Read [docs/architecture.md](docs/architecture.md) before modifying src/ modules
-5. Run `bun test` after any code change — 1472+ tests must stay green
+5. Run `bun test` after any code change — 1829+ tests must stay green
 6. Tech stack: Bun + TypeScript. Orchestration uses Claude Agent SDK + BullMQ + PostgreSQL (planned)
 7. Use `--dry-run` flag for plan-only execution when testing goal flows
 8. E2E tests in `src/__tests__/e2e/` cover cross-module integration; read `helpers.ts` for bootstrap utilities
