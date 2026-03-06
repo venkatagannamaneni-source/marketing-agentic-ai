@@ -22,6 +22,17 @@ export interface RevisionRequest {
   readonly priority: RevisionPriority;
 }
 
+// ── Consistency Types ────────────────────────────────────────────────────────
+
+export type ConsistencyDimension = "tone" | "terminology" | "messaging";
+
+export interface ConsistencyFinding {
+  readonly dimension: ConsistencyDimension;
+  readonly severity: FindingSeverity;
+  readonly description: string;
+  readonly affectedOutputs: readonly string[];
+}
+
 export interface Review {
   readonly id: string;
   readonly taskId: string;

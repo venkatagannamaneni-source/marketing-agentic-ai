@@ -169,6 +169,12 @@ export {
   type ToolInvocationRecord,
   AgentExecutor,
   DEFAULT_EXECUTOR_CONFIG,
+  // Pipeline Template Registry
+  PipelineTemplateRegistry,
+  PipelineTemplateRegistryError,
+  type PipelineTemplateRegistryData,
+  type PipelineTemplateData,
+  type PipelineStepData,
 } from "./agents/index.ts";
 
 // ── Director ─────────────────────────────────────────────────────────────────
@@ -205,8 +211,13 @@ export {
   DIRECTOR_SYSTEM_PROMPT,
   buildDirectorPrompt,
   routeGoal,
+  routeGoalFromRegistry,
   selectSkills,
   ROUTING_RULES,
+  RoutingRegistry,
+  RoutingRegistryError,
+  type RoutingRegistryData,
+  type RoutingRuleData,
   GoalDecomposer,
   GOAL_CATEGORY_TEMPLATE_MAP,
   PipelineFactory,
@@ -282,6 +293,8 @@ export {
   EventBus,
   DEFAULT_EVENT_MAPPINGS,
   createWebhookServer,
+  EventRegistry,
+  EventRegistryError,
 } from "./events/index.ts";
 
 export type {
@@ -296,6 +309,10 @@ export type {
   WebhookServerConfig,
   WebhookServer,
   WebhookStats,
+  EventRegistryData,
+  EventMappingConfig,
+  EventCondition,
+  ConditionOperator,
 } from "./events/index.ts";
 
 // ── Scheduler ───────────────────────────────────────────────────────────────
@@ -312,6 +329,10 @@ export {
   CronParseError,
   type CronFields,
   DEFAULT_SCHEDULES,
+  ScheduleRegistry,
+  ScheduleRegistryError,
+  type ScheduleRegistryData,
+  type ScheduleEntryData,
 } from "./scheduler/index.ts";
 
 // ── BullMQ Adapters ─────────────────────────────────────────────────────────

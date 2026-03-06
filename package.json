@@ -2,7 +2,8 @@
   "name": "marketing-agentic-ai",
   "module": "index.ts",
   "scripts": {
-    "start": "bun run src/cli.ts"
+    "start": "bun run src/cli.ts",
+    "validate-config": "bun run src/validate-config.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

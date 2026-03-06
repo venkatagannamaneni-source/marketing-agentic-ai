@@ -18,6 +18,10 @@ import { PipelineFactory } from "./director/pipeline-factory.ts";
 import { PIPELINE_TEMPLATES } from "./agents/registry.ts";
 import { SkillRegistry } from "./agents/skill-registry.ts";
 import { ToolRegistry, ToolRegistryError } from "./agents/tool-registry.ts";
+import { RoutingRegistry, RoutingRegistryError } from "./director/routing-registry.ts";
+import { ScheduleRegistry, ScheduleRegistryError } from "./scheduler/schedule-registry.ts";
+import { EventRegistry, EventRegistryError } from "./events/event-registry.ts";
+import { PipelineTemplateRegistry, PipelineTemplateRegistryError } from "./agents/pipeline-template-registry.ts";
 import { TaskQueueManager } from "./queue/task-queue.ts";
 import { createRedisConnection } from "./queue/redis-connection.ts";
 import type { RedisConnectionManager } from "./queue/redis-connection.ts";
@@ -110,6 +114,82 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     }
   }
 
+  // 2c. Routing Registry — load from .agents/routing.yaml (optional)
+  const routingPath = resolve(config.projectRoot, ".agents/routing.yaml");
+  let routingRegistry: RoutingRegistry | undefined;
+  try {
+    routingRegistry = await RoutingRegistry.fromYaml(routingPath);
+    logger.info("Routing registry loaded", {
+      categories: routingRegistry.categories.length,
+    });
+  } catch (err: unknown) {
+    if (
+      err instanceof RoutingRegistryError &&
+      err.errors.some((e) => e.includes("not found"))
+    ) {
+      logger.info("No routing.yaml found, using hardcoded ROUTING_RULES fallback");
+    } else {
+      throw err;
+    }
+  }
+
+  // 2d. Schedule Registry — load from .agents/schedules.yaml (optional)
+  const schedulesPath = resolve(config.projectRoot, ".agents/schedules.yaml");
+  let scheduleRegistry: ScheduleRegistry | undefined;
+  try {
+    scheduleRegistry = await ScheduleRegistry.fromYaml(schedulesPath);
+    logger.info("Schedule registry loaded", {
+      schedules: scheduleRegistry.schedules.length,
+    });
+  } catch (err: unknown) {
+    if (
+      err instanceof ScheduleRegistryError &&
+      err.errors.some((e) => e.includes("not found"))
+    ) {
+      logger.info("No schedules.yaml found, using DEFAULT_SCHEDULES fallback");
+    } else {
+      throw err;
+    }
+  }
+
+  // 2e. Event Registry — load from .agents/events.yaml (optional)
+  const eventsPath = resolve(config.projectRoot, ".agents/events.yaml");
+  let eventRegistry: EventRegistry | undefined;
+  try {
+    eventRegistry = await EventRegistry.fromYaml(eventsPath);
+    logger.info("Event registry loaded", {
+      mappings: eventRegistry.mappings.length,
+    });
+  } catch (err: unknown) {
+    if (
+      err instanceof EventRegistryError &&
+      err.errors.some((e) => e.includes("not found"))
+    ) {
+      logger.info("No events.yaml found, using DEFAULT_EVENT_MAPPINGS fallback");
+    } else {
+      throw err;
+    }
+  }
+
+  // 2f. Pipeline Template Registry — load from .agents/pipelines.yaml (optional)
+  const pipelinesPath = resolve(config.projectRoot, ".agents/pipelines.yaml");
+  let pipelineTemplateRegistry: PipelineTemplateRegistry | undefined;
+  try {
+    pipelineTemplateRegistry = await PipelineTemplateRegistry.fromYaml(pipelinesPath);
+    logger.info("Pipeline template registry loaded", {
+      templates: pipelineTemplateRegistry.templates.length,
+    });
+  } catch (err: unknown) {
+    if (
+      err instanceof PipelineTemplateRegistryError &&
+      err.errors.some((e) => e.includes("not found"))
+    ) {
+      logger.info("No pipelines.yaml found, using PIPELINE_TEMPLATES fallback");
+    } else {
+      throw err;
+    }
+  }
+
   // 3. Workspace
   const workspace = new FileSystemWorkspaceManager({
     rootDir: config.workspace.rootDir,
@@ -166,8 +246,11 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     qualityScorer,
   );
 
-  // 9. Pipeline Engine
-  const pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES, registry);
+  // 10. Pipeline Engine — prefer YAML templates if available
+  const templates = pipelineTemplateRegistry
+    ? pipelineTemplateRegistry.templates
+    : PIPELINE_TEMPLATES;
+  const pipelineFactory = new PipelineFactory(templates, registry);
   const pipelineEngine = new SequentialPipelineEngine(
     pipelineFactory,
     executor,
@@ -231,8 +314,11 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     logger,
   });
 
-  // 14. EventBus (needs child logger here — EventBusLogger interface has no .child())
-  const eventBus = new EventBus(DEFAULT_EVENT_MAPPINGS, {
+  // 14. EventBus — prefer YAML event mappings if available
+  const eventMappings = eventRegistry
+    ? eventRegistry.toEventMappings()
+    : DEFAULT_EVENT_MAPPINGS;
+  const eventBus = new EventBus(eventMappings, {
     director,
     queueManager,
     logger: logger.child({ module: "event-bus" }),
@@ -269,7 +355,10 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
       logger.info("Starting application");
       await queueManager.start();
       logger.info("Queue manager started");
-      await scheduler.start(DEFAULT_SCHEDULES);
+      const schedules = scheduleRegistry
+        ? scheduleRegistry.schedules
+        : DEFAULT_SCHEDULES;
+      await scheduler.start(schedules);
       logger.info("Scheduler started");
     },
 

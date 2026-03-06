@@ -25,6 +25,8 @@ export type {
   RevisionPriority,
   RevisionRequest,
   Review,
+  ConsistencyDimension,
+  ConsistencyFinding,
 } from "./review.ts";
 
 export type {

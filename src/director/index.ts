@@ -27,7 +27,15 @@ export {
 export { DIRECTOR_SYSTEM_PROMPT, buildDirectorPrompt } from "./system-prompt.ts";
 
 // ── Squad Router ─────────────────────────────────────────────────────────────
-export { routeGoal, selectSkills, ROUTING_RULES } from "./squad-router.ts";
+export { routeGoal, routeGoalFromRegistry, selectSkills, ROUTING_RULES } from "./squad-router.ts";
+
+// ── Routing Registry ─────────────────────────────────────────────────────────
+export {
+  RoutingRegistry,
+  RoutingRegistryError,
+  type RoutingRegistryData,
+  type RoutingRuleData,
+} from "./routing-registry.ts";
 
 // ── Goal Decomposer ─────────────────────────────────────────────────────────
 export {

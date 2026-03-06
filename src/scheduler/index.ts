@@ -19,3 +19,11 @@ export {
 
 // ── Default Schedules ────────────────────────────────────────────────────────
 export { DEFAULT_SCHEDULES } from "./default-schedules.ts";
+
+// ── Schedule Registry ────────────────────────────────────────────────────────
+export {
+  ScheduleRegistry,
+  ScheduleRegistryError,
+  type ScheduleRegistryData,
+  type ScheduleEntryData,
+} from "./schedule-registry.ts";
