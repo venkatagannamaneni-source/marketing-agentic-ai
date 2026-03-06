@@ -68,5 +68,9 @@ export type {
   LearningEffectivenessReport,
 } from "./learning-validator.ts";
 
+// ── Consistency Checker ──────────────────────────────────────────────────────
+export { ConsistencyChecker } from "./consistency-checker.ts";
+export type { ConsistencyResult } from "./consistency-checker.ts";
+
 // ── Marketing Director ───────────────────────────────────────────────────────
 export { MarketingDirector, generateGoalId } from "./director.ts";

@@ -50,6 +50,8 @@ export type {
   QualityThreshold,
   SkillDimensionCriteria,
   SkillQualityCriteria,
+  ConsistencyDimension,
+  ConsistencyFinding,
 } from "./types/index.ts";
 
 // ── Type Constants ────────────────────────────────────────────────────────────
@@ -190,6 +192,7 @@ export type {
   SemanticReviewConfig,
   LearningValidationResult,
   LearningEffectivenessReport,
+  ConsistencyResult,
 } from "./director/index.ts";
 
 export {
@@ -217,6 +220,7 @@ export {
   getSkillCriteria,
   resolveThreshold,
   LearningValidator,
+  ConsistencyChecker,
 } from "./director/index.ts";
 
 // ── Pipeline Engine ──────────────────────────────────────────────────────────
