@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { EVENT_TYPES, type SystemEvent } from "../types/events.ts";
-import type { Priority } from "../types/task.ts";
+import { PRIORITIES, type Priority } from "../types/task.ts";
 import type { EventMapping } from "./event-bus.ts";
 
 // ── Condition Types ──────────────────────────────────────────────────────────
@@ -82,7 +82,15 @@ export class EventRegistry {
         [err instanceof Error ? err.message : String(err)],
       );
     }
-    const raw = parseYaml(content);
+    let raw: unknown;
+    try {
+      raw = parseYaml(content);
+    } catch (err: unknown) {
+      throw new EventRegistryError(
+        `Failed to parse YAML: ${yamlPath}`,
+        [err instanceof Error ? err.message : String(err)],
+      );
+    }
     EventRegistry.validateShape(raw);
     const registry = new EventRegistry(raw);
     registry.validate();
@@ -170,7 +178,7 @@ export class EventRegistry {
         return {
           ...mapping,
           condition: (event: SystemEvent): boolean =>
-            this.evaluateCondition(condition, event.data),
+            this.evaluateCondition(condition, (event.data ?? {}) as Record<string, unknown>),
         };
       }
 
@@ -205,7 +213,7 @@ export class EventRegistry {
   private validate(): void {
     const errors: string[] = [];
     const validEventTypes = EVENT_TYPES as readonly string[];
-    const validPriorities = ["P0", "P1", "P2", "P3"];
+    const validPriorities = PRIORITIES as readonly string[];
 
     for (let i = 0; i < this._mappings.length; i++) {
       const m = this._mappings[i]!;

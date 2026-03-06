@@ -65,7 +65,15 @@ export class ScheduleRegistry {
         [err instanceof Error ? err.message : String(err)],
       );
     }
-    const raw = parseYaml(content);
+    let raw: unknown;
+    try {
+      raw = parseYaml(content);
+    } catch (err: unknown) {
+      throw new ScheduleRegistryError(
+        `Failed to parse YAML: ${yamlPath}`,
+        [err instanceof Error ? err.message : String(err)],
+      );
+    }
     ScheduleRegistry.validateShape(raw);
     const entries = ScheduleRegistry.toScheduleEntries(raw);
     const registry = new ScheduleRegistry(entries);
@@ -123,6 +131,34 @@ export class ScheduleRegistry {
     const d = data as Record<string, unknown>;
     if (!Array.isArray(d.schedules)) {
       errors.push("Missing or invalid 'schedules' key (expected an array)");
+      throw new ScheduleRegistryError(
+        `Invalid YAML schema: ${errors.length} error(s)`,
+        errors,
+      );
+    }
+
+    for (let i = 0; i < d.schedules.length; i++) {
+      const entry = d.schedules[i];
+      if (!entry || typeof entry !== "object") {
+        errors.push(`schedules[${i}]: expected an object`);
+        continue;
+      }
+      const e = entry as Record<string, unknown>;
+      if (typeof e.id !== "string" || e.id.trim().length === 0) {
+        errors.push(`schedules[${i}]: missing or invalid 'id' (expected non-empty string)`);
+      }
+      if (typeof e.name !== "string" || e.name.trim().length === 0) {
+        errors.push(`schedules[${i}]: missing or invalid 'name' (expected non-empty string)`);
+      }
+      if (typeof e.cron !== "string" || e.cron.trim().length === 0) {
+        errors.push(`schedules[${i}]: missing or invalid 'cron' (expected non-empty string)`);
+      }
+      if (typeof e.pipelineId !== "string" || e.pipelineId.trim().length === 0) {
+        errors.push(`schedules[${i}]: missing or invalid 'pipelineId' (expected non-empty string)`);
+      }
+      if (typeof e.enabled !== "boolean") {
+        errors.push(`schedules[${i}]: missing or invalid 'enabled' (expected boolean)`);
+      }
     }
     if (errors.length > 0) {
       throw new ScheduleRegistryError(

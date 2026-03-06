@@ -261,6 +261,57 @@ describe("ScheduleRegistry schema validation", () => {
   });
 });
 
+// ── Required field validation ───────────────────────────────────────────────
+
+describe("ScheduleRegistry required field validation", () => {
+  it("rejects schedule entry missing id", () => {
+    const bad = { schedules: [{ name: "X", cron: "0 9 * * *", pipelineId: "p", enabled: true, description: "d" }] };
+    try {
+      ScheduleRegistry.fromData(bad as unknown as ScheduleRegistryData);
+      throw new Error("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ScheduleRegistryError);
+      expect((err as ScheduleRegistryError).errors.some((e) => e.includes("missing or invalid 'id'"))).toBe(true);
+    }
+  });
+
+  it("rejects schedule entry missing enabled", () => {
+    const bad = { schedules: [{ id: "x", name: "X", cron: "0 9 * * *", pipelineId: "p", description: "d" }] };
+    try {
+      ScheduleRegistry.fromData(bad as unknown as ScheduleRegistryData);
+      throw new Error("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ScheduleRegistryError);
+      expect((err as ScheduleRegistryError).errors.some((e) => e.includes("missing or invalid 'enabled'"))).toBe(true);
+    }
+  });
+
+  it("rejects non-object schedule entry", () => {
+    const bad = { schedules: ["not-an-object"] };
+    try {
+      ScheduleRegistry.fromData(bad as unknown as ScheduleRegistryData);
+      throw new Error("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ScheduleRegistryError);
+      expect((err as ScheduleRegistryError).errors.some((e) => e.includes("expected an object"))).toBe(true);
+    }
+  });
+
+  it("rejects malformed YAML with parse error wrapped in ScheduleRegistryError", async () => {
+    const { writeFile, mkdtemp, unlink } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = await mkdtemp(join(tmpdir(), "sched-reg-"));
+    const path = join(dir, "bad.yaml");
+    await writeFile(path, ":\n  :\n    - [invalid yaml");
+    try {
+      await expect(ScheduleRegistry.fromYaml(path)).rejects.toThrow(ScheduleRegistryError);
+    } finally {
+      await unlink(path);
+    }
+  });
+});
+
 // ── YAML Loading ─────────────────────────────────────────────────────────────
 
 describe("ScheduleRegistry.fromYaml", () => {

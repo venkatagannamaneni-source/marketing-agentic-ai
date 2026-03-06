@@ -244,6 +244,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     logger,
     registry,
     qualityScorer,
+    routingRegistry,
   );
 
   // 10. Pipeline Engine — prefer YAML templates if available
@@ -258,7 +259,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     logger,
   );
 
-  // 10. Redis connection (lazy connect — no TCP until first operation)
+  // 11. Redis connection (lazy connect — no TCP until first operation)
   const redis: RedisConnectionManager = await createRedisConnection({
     host: config.redis.host,
     port: config.redis.port,

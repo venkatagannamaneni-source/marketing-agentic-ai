@@ -28,7 +28,8 @@ import { ReviewEngine } from "./review-engine.ts";
 import type { SemanticReviewConfig } from "./review-engine.ts";
 import type { QualityScorer } from "./quality-scorer.ts";
 import { EscalationEngine } from "./escalation.ts";
-import { routeGoal } from "./squad-router.ts";
+import { routeGoal, routeGoalFromRegistry } from "./squad-router.ts";
+import type { RoutingRegistry } from "./routing-registry.ts";
 import { parseLearnings } from "../workspace/markdown.ts";
 import type { ClaudeClient } from "../agents/claude-client.ts";
 import { AgentExecutor } from "../agents/executor.ts";
@@ -62,6 +63,7 @@ export class MarketingDirector {
   private readonly skillSquadMap: Record<string, string | null>;
   private readonly foundationSkill: string;
   private readonly directorPrompt: string;
+  private readonly routingRegistry?: RoutingRegistry;
 
   constructor(
     private readonly workspace: WorkspaceManager,
@@ -72,6 +74,7 @@ export class MarketingDirector {
     logger?: Logger,
     registry?: SkillRegistry,
     qualityScorer?: QualityScorer,
+    routingRegistry?: RoutingRegistry,
   ) {
     this.config = { ...DEFAULT_DIRECTOR_CONFIG, ...config };
     this.logger = (logger ?? NULL_LOGGER).child({ module: "director" });
@@ -90,6 +93,7 @@ export class MarketingDirector {
     this.pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES, registry);
     this.reviewEngine = new ReviewEngine(this.config, client, qualityScorer);
     this.escalationEngine = new EscalationEngine(this.config);
+    this.routingRegistry = routingRegistry;
   }
 
   // ── Goal Management ──────────────────────────────────────────────────────
@@ -539,6 +543,9 @@ export class MarketingDirector {
    * Route a goal category to the appropriate squad sequence.
    */
   routeGoal(category: GoalCategory): RoutingDecision {
+    if (this.routingRegistry) {
+      return routeGoalFromRegistry(category, this.routingRegistry);
+    }
     return routeGoal(category);
   }
 

@@ -44,6 +44,7 @@ const VALID_PRIORITIES = new Set(["P0", "P1", "P2", "P3"]);
 export class PipelineTemplateRegistry {
   private readonly _templates: readonly PipelineTemplate[];
   private readonly _templatesByName: ReadonlyMap<string, PipelineTemplate>;
+  private readonly _templateNames: readonly string[];
 
   private constructor(data: PipelineTemplateRegistryData, validSkills?: ReadonlySet<string>) {
     PipelineTemplateRegistry.validateData(data, validSkills);
@@ -57,6 +58,7 @@ export class PipelineTemplateRegistry {
       byName.set(t.name, t);
     }
     this._templatesByName = byName;
+    this._templateNames = Object.freeze(this._templates.map((t) => t.name));
   }
 
   static async fromYaml(
@@ -82,7 +84,15 @@ export class PipelineTemplateRegistry {
         [err instanceof Error ? err.message : String(err)],
       );
     }
-    const raw = parseYaml(content);
+    let raw: unknown;
+    try {
+      raw = parseYaml(content);
+    } catch (err: unknown) {
+      throw new PipelineTemplateRegistryError(
+        `Failed to parse YAML: ${yamlPath}`,
+        [err instanceof Error ? err.message : String(err)],
+      );
+    }
     PipelineTemplateRegistry.validateShape(raw);
     return new PipelineTemplateRegistry(raw, validSkills);
   }
@@ -102,7 +112,7 @@ export class PipelineTemplateRegistry {
   }
 
   get templateNames(): readonly string[] {
-    return Object.freeze(this._templates.map((t) => t.name));
+    return this._templateNames;
   }
 
   findTemplate(name: string): PipelineTemplate | undefined {
@@ -146,6 +156,17 @@ export class PipelineTemplateRegistry {
     const d = data as Record<string, unknown>;
     if (!Array.isArray(d.pipelines)) {
       errors.push("Missing or invalid 'pipelines' key (expected an array)");
+      throw new PipelineTemplateRegistryError(
+        `Invalid YAML schema: ${errors.length} error(s)`,
+        errors,
+      );
+    }
+
+    for (let i = 0; i < d.pipelines.length; i++) {
+      const entry = d.pipelines[i];
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        errors.push(`pipelines[${i}]: expected an object`);
+      }
     }
     if (errors.length > 0) {
       throw new PipelineTemplateRegistryError(
@@ -180,6 +201,12 @@ export class PipelineTemplateRegistry {
       if (!pipeline.description || typeof pipeline.description !== "string") {
         errors.push(
           `Pipeline "${pipeline.name}" missing required 'description' field`,
+        );
+      }
+
+      if (!pipeline.trigger || typeof pipeline.trigger !== "string") {
+        errors.push(
+          `Pipeline "${pipeline.name}" missing required 'trigger' field`,
         );
       }
 

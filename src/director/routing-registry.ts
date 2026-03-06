@@ -72,7 +72,15 @@ export class RoutingRegistry {
         [err instanceof Error ? err.message : String(err)],
       );
     }
-    const raw = parseYaml(content);
+    let raw: unknown;
+    try {
+      raw = parseYaml(content);
+    } catch (err: unknown) {
+      throw new RoutingRegistryError(
+        `Failed to parse YAML: ${yamlPath}`,
+        [err instanceof Error ? err.message : String(err)],
+      );
+    }
     RoutingRegistry.validateShape(raw);
     const registry = new RoutingRegistry(raw);
     registry.validate();
@@ -147,6 +155,14 @@ export class RoutingRegistry {
           errors.push(
             `Category "${category}" route ${i}: missing or invalid 'skills' (expected array)`,
           );
+        } else {
+          for (let j = 0; j < r.skills.length; j++) {
+            if (typeof r.skills[j] !== "string") {
+              errors.push(
+                `Category "${category}" route ${i}: skills[${j}] must be a string, got ${typeof r.skills[j]}`,
+              );
+            }
+          }
         }
         if (typeof r.reason !== "string") {
           errors.push(

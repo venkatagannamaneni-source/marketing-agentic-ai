@@ -228,6 +228,50 @@ describe("PipelineTemplateRegistry validation", () => {
     ).toThrow(/unknown skill/);
   });
 
+  it("rejects missing trigger", () => {
+    const bad = {
+      pipelines: [
+        {
+          name: "No Trigger",
+          description: "Test",
+          defaultPriority: "P1",
+          steps: [{ skill: "copywriting" }],
+        },
+      ],
+    };
+    expect(() =>
+      PipelineTemplateRegistry.fromData(bad as unknown as PipelineTemplateRegistryData),
+    ).toThrow(PipelineTemplateRegistryError);
+    expect(() =>
+      PipelineTemplateRegistry.fromData(bad as unknown as PipelineTemplateRegistryData),
+    ).toThrow(/trigger/);
+  });
+
+  it("rejects non-object pipeline entries in validateShape", () => {
+    const bad = { pipelines: ["not-an-object"] };
+    try {
+      PipelineTemplateRegistry.fromData(bad as unknown as PipelineTemplateRegistryData);
+      throw new Error("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(PipelineTemplateRegistryError);
+      expect((err as PipelineTemplateRegistryError).errors.some((e) => e.includes("expected an object"))).toBe(true);
+    }
+  });
+
+  it("wraps YAML parse errors in PipelineTemplateRegistryError", async () => {
+    const { writeFile, mkdtemp, unlink } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = await mkdtemp(join(tmpdir(), "pipe-reg-"));
+    const path = join(dir, "bad.yaml");
+    await writeFile(path, ":\n  :\n    - [invalid yaml");
+    try {
+      await expect(PipelineTemplateRegistry.fromYaml(path)).rejects.toThrow(PipelineTemplateRegistryError);
+    } finally {
+      await unlink(path);
+    }
+  });
+
   it("allows director as review step without validSkills check", () => {
     const data: PipelineTemplateRegistryData = {
       pipelines: [

@@ -99,6 +99,38 @@ describe("RoutingRegistry validation", () => {
       RoutingRegistry.fromData(null as unknown as RoutingRegistryData),
     ).toThrow(RoutingRegistryError);
   });
+
+  it("rejects non-string skills in array", () => {
+    const bad = {
+      rules: {
+        strategic: [
+          { squad: "strategy", skills: [123, null], reason: "test" },
+        ],
+      },
+    };
+    try {
+      RoutingRegistry.fromData(bad as unknown as RoutingRegistryData);
+      throw new Error("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(RoutingRegistryError);
+      const regErr = err as RoutingRegistryError;
+      expect(regErr.errors.some((e) => e.includes("must be a string"))).toBe(true);
+    }
+  });
+
+  it("wraps YAML parse errors in RoutingRegistryError", async () => {
+    const { writeFile, mkdtemp, unlink } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = await mkdtemp(join(tmpdir(), "routing-reg-"));
+    const path = join(dir, "bad.yaml");
+    await writeFile(path, ":\n  :\n    - [invalid yaml");
+    try {
+      await expect(RoutingRegistry.fromYaml(path)).rejects.toThrow(RoutingRegistryError);
+    } finally {
+      await unlink(path);
+    }
+  });
 });
 
 // ── Cross-validation ──────────────────────────────────────────────────────
