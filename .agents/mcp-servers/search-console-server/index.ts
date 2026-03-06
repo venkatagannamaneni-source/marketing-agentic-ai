@@ -87,10 +87,20 @@ const TOOLS = [
 
 // ── API Helpers ─────────────────────────────────────────────────────────────
 
+const FETCH_TIMEOUT_MS = 30_000;
+
 function getAccessToken(): string {
   const token = process.env.TOOL_ACCESS_TOKEN;
   if (!token) throw new Error("TOOL_ACCESS_TOKEN not set");
   return token;
+}
+
+function requireString(args: Record<string, unknown>, field: string): string {
+  const val = args[field];
+  if (typeof val !== "string" || !val) {
+    throw new Error(`Missing required parameter: ${field}`);
+  }
+  return val;
 }
 
 async function apiRequest(
@@ -98,23 +108,31 @@ async function apiRequest(
   options: RequestInit = {},
 ): Promise<unknown> {
   const token = getAccessToken();
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(options.headers as Record<string, string>),
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(
-      `Search Console API error ${response.status}: ${body.slice(0, 500)}`,
-    );
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...(options.headers as Record<string, string>),
+      },
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `Search Console API error ${response.status}: ${body.slice(0, 500)}`,
+      );
+    }
+
+    return response.json();
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return response.json();
 }
 
 // ── Tool Handlers ──────────────────────────────────────────────────────────
@@ -122,10 +140,10 @@ async function apiRequest(
 async function querySearchAnalytics(
   args: Record<string, unknown>,
 ): Promise<string> {
-  const siteUrl = args.site_url as string;
+  const siteUrl = requireString(args, "site_url");
   const body: Record<string, unknown> = {
-    startDate: args.start_date as string,
-    endDate: args.end_date as string,
+    startDate: requireString(args, "start_date"),
+    endDate: requireString(args, "end_date"),
     rowLimit: (args.row_limit as number) ?? 1000,
   };
   if (args.dimensions) {
@@ -144,7 +162,7 @@ async function querySearchAnalytics(
 async function getIndexCoverage(
   args: Record<string, unknown>,
 ): Promise<string> {
-  const siteUrl = args.site_url as string;
+  const siteUrl = requireString(args, "site_url");
 
   // Use URL Inspection API to get a summary via search analytics
   // The actual index coverage report is only in Search Console UI,
@@ -158,7 +176,7 @@ async function getIndexCoverage(
 }
 
 async function listSitemaps(args: Record<string, unknown>): Promise<string> {
-  const siteUrl = args.site_url as string;
+  const siteUrl = requireString(args, "site_url");
   const encodedSiteUrl = encodeURIComponent(siteUrl);
 
   const result = await apiRequest(
@@ -169,8 +187,8 @@ async function listSitemaps(args: Record<string, unknown>): Promise<string> {
 }
 
 async function inspectUrl(args: Record<string, unknown>): Promise<string> {
-  const siteUrl = args.site_url as string;
-  const inspectionUrl = args.inspection_url as string;
+  const siteUrl = requireString(args, "site_url");
+  const inspectionUrl = requireString(args, "inspection_url");
 
   const result = await apiRequest(
     `${SEARCH_CONSOLE_API}/urlInspection/index:inspect`,
@@ -255,16 +273,20 @@ rl.on("line", async (line: string) => {
   if (!line.trim()) return;
 
   try {
-    const msg = JSON.parse(line) as {
-      jsonrpc: string;
-      id?: number;
-      method: string;
-      params?: Record<string, unknown>;
-    };
+    const msg = JSON.parse(line) as Record<string, unknown>;
+
+    if (!msg.method || typeof msg.method !== "string") {
+      if (msg.id !== undefined) {
+        process.stdout.write(
+          JSON.stringify({ jsonrpc: "2.0", id: msg.id, error: { code: -32600, message: "Invalid request: missing method" } }) + "\n",
+        );
+      }
+      return;
+    }
 
     if (msg.id === undefined) return;
 
-    const result = await handleRequest(msg.method, msg.params ?? {});
+    const result = await handleRequest(msg.method, (msg.params ?? {}) as Record<string, unknown>);
     if (result !== undefined) {
       const response = JSON.stringify({
         jsonrpc: "2.0",

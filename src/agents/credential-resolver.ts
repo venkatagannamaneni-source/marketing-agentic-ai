@@ -68,9 +68,14 @@ interface CachedToken {
 export class EnvCredentialResolver implements CredentialResolver {
   private readonly logger: Logger;
   private readonly tokenCache = new Map<string, CachedToken>();
+  /** Deduplicates concurrent refresh calls per cache key. */
+  private readonly inflightRefreshes = new Map<string, Promise<ResolvedCredential>>();
 
   /** Buffer before expiry to refresh proactively (5 minutes). */
   private static readonly REFRESH_BUFFER_MS = 5 * 60 * 1000;
+
+  /** Timeout for credential fetch calls (15 seconds). */
+  private static readonly FETCH_TIMEOUT_MS = 15_000;
 
   /** Google OAuth2 token endpoint. */
   private static readonly GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -146,20 +151,49 @@ export class EnvCredentialResolver implements CredentialResolver {
       };
     }
 
-    // Refresh token
+    // Deduplicate concurrent refresh calls
+    const inflight = this.inflightRefreshes.get("google_oauth");
+    if (inflight) return inflight;
+
+    const promise = this.doGoogleOAuthRefresh(clientId, clientSecret, refreshToken);
+    this.inflightRefreshes.set("google_oauth", promise);
+    try {
+      return await promise;
+    } finally {
+      this.inflightRefreshes.delete("google_oauth");
+    }
+  }
+
+  private async doGoogleOAuthRefresh(
+    clientId: string,
+    clientSecret: string,
+    refreshToken: string,
+  ): Promise<ResolvedCredential> {
     this.logger.debug("credential_oauth_refresh", { provider: "google" });
 
     try {
-      const response = await fetch(EnvCredentialResolver.GOOGLE_TOKEN_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_id: clientId,
-          client_secret: clientSecret,
-          refresh_token: refreshToken,
-          grant_type: "refresh_token",
-        }),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        EnvCredentialResolver.FETCH_TIMEOUT_MS,
+      );
+
+      let response: Response;
+      try {
+        response = await fetch(EnvCredentialResolver.GOOGLE_TOKEN_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: clientId,
+            client_secret: clientSecret,
+            refresh_token: refreshToken,
+            grant_type: "refresh_token",
+          }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (!response.ok) {
         const body = await response.text();
@@ -170,14 +204,27 @@ export class EnvCredentialResolver implements CredentialResolver {
         );
       }
 
-      const data = (await response.json()) as {
-        access_token: string;
-        expires_in: number;
-      };
+      const data = (await response.json()) as Record<string, unknown>;
 
-      const expiresAt = Date.now() + data.expires_in * 1000;
+      // Validate response shape
+      if (typeof data.access_token !== "string" || !data.access_token) {
+        throw new CredentialError(
+          "Google OAuth response missing access_token",
+          "GOOGLE_OAUTH_CREDENTIALS",
+          "invalid",
+        );
+      }
+      if (typeof data.expires_in !== "number" || data.expires_in <= 0) {
+        throw new CredentialError(
+          "Google OAuth response missing or invalid expires_in",
+          "GOOGLE_OAUTH_CREDENTIALS",
+          "invalid",
+        );
+      }
+
+      const expiresAt = Date.now() + (data.expires_in as number) * 1000;
       this.tokenCache.set("google_oauth", {
-        accessToken: data.access_token,
+        accessToken: data.access_token as string,
         expiresAt,
       });
 
@@ -188,7 +235,7 @@ export class EnvCredentialResolver implements CredentialResolver {
 
       return {
         type: "oauth2",
-        accessToken: data.access_token,
+        accessToken: data.access_token as string,
         expiresAt,
       };
     } catch (err: unknown) {
@@ -228,7 +275,8 @@ export class EnvCredentialResolver implements CredentialResolver {
     }
 
     // Check cache
-    const cached = this.tokenCache.get(`sa_${envName}`);
+    const cacheKey = `sa_${envName}`;
+    const cached = this.tokenCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now() + EnvCredentialResolver.REFRESH_BUFFER_MS) {
       return {
         type: "service-account",
@@ -237,7 +285,25 @@ export class EnvCredentialResolver implements CredentialResolver {
       };
     }
 
-    // Read and parse service account JSON
+    // Deduplicate concurrent refresh calls
+    const inflight = this.inflightRefreshes.get(cacheKey);
+    if (inflight) return inflight;
+
+    const promise = this.doServiceAccountRefresh(envName, keyPath);
+    this.inflightRefreshes.set(cacheKey, promise);
+    try {
+      return await promise;
+    } finally {
+      this.inflightRefreshes.delete(cacheKey);
+    }
+  }
+
+  private async doServiceAccountRefresh(
+    envName: string,
+    keyPath: string,
+  ): Promise<ResolvedCredential> {
+    const cacheKey = `sa_${envName}`;
+
     try {
       const { readFile } = await import("node:fs/promises");
       const keyContent = await readFile(keyPath, "utf-8");
@@ -281,14 +347,26 @@ export class EnvCredentialResolver implements CredentialResolver {
 
       const jwt = `${header}.${claim}.${signature}`;
 
-      const response = await fetch(tokenUri, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-          assertion: jwt,
-        }),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        EnvCredentialResolver.FETCH_TIMEOUT_MS,
+      );
+
+      let response: Response;
+      try {
+        response = await fetch(tokenUri, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            assertion: jwt,
+          }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (!response.ok) {
         const body = await response.text();
@@ -299,26 +377,39 @@ export class EnvCredentialResolver implements CredentialResolver {
         );
       }
 
-      const data = (await response.json()) as {
-        access_token: string;
-        expires_in: number;
-      };
+      const data = (await response.json()) as Record<string, unknown>;
 
-      const expiresAt = Date.now() + data.expires_in * 1000;
-      this.tokenCache.set(`sa_${envName}`, {
-        accessToken: data.access_token,
+      // Validate response shape
+      if (typeof data.access_token !== "string" || !data.access_token) {
+        throw new CredentialError(
+          "Service account token response missing access_token",
+          envName,
+          "invalid",
+        );
+      }
+      if (typeof data.expires_in !== "number" || data.expires_in <= 0) {
+        throw new CredentialError(
+          "Service account token response missing or invalid expires_in",
+          envName,
+          "invalid",
+        );
+      }
+
+      const expiresAt = Date.now() + (data.expires_in as number) * 1000;
+      this.tokenCache.set(cacheKey, {
+        accessToken: data.access_token as string,
         expiresAt,
       });
 
       return {
         type: "service-account",
-        accessToken: data.access_token,
+        accessToken: data.access_token as string,
         expiresAt,
       };
     } catch (err: unknown) {
       if (err instanceof CredentialError) throw err;
       throw new CredentialError(
-        `Service account resolution failed: ${err instanceof Error ? err.message : String(err)}`,
+        `Service account resolution failed (file: ${keyPath}): ${err instanceof Error ? err.message : String(err)}`,
         envName,
         "refresh_failed",
       );

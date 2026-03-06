@@ -388,7 +388,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
         });
       }
 
-      // 2. Stop queue manager (stops health checks, closes worker and queue)
+      // 2. Stop queue manager (waits for in-flight tasks to finish)
       try {
         await queueManager.stop();
         logger.info("Queue manager stopped");
@@ -398,7 +398,17 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
         });
       }
 
-      // 3. Flush cost data to workspace
+      // 3. Disconnect MCP servers (safe now that queue is drained)
+      try {
+        await mcpProvider.disconnectAll();
+        logger.info("MCP servers disconnected");
+      } catch (err: unknown) {
+        logger.error("Error disconnecting MCP servers", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      // 4. Flush cost data to workspace
       try {
         const metricsDir = `${config.workspace.rootDir}/metrics`;
         await costTracker.flush(metricsDir, {
@@ -416,16 +426,6 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
         });
       }
 
-      // 4. Disconnect MCP servers
-      try {
-        await mcpProvider.disconnectAll();
-        logger.info("MCP servers disconnected");
-      } catch (err: unknown) {
-        logger.error("Error disconnecting MCP servers", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-
       // 5. Close Redis connection
       try {
         await redis.close();
@@ -436,7 +436,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
         });
       }
 
-      // 5. Remove signal handlers to prevent accumulation
+      // 6. Remove signal handlers to prevent accumulation
       process.removeListener("SIGTERM", sigtermHandler);
       process.removeListener("SIGINT", sigintHandler);
 

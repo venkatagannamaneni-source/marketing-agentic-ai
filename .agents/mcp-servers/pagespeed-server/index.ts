@@ -59,17 +59,40 @@ const TOOLS = [
 
 // ── API Helpers ─────────────────────────────────────────────────────────────
 
+const FETCH_TIMEOUT_MS = 60_000; // PageSpeed audits can take a while
+
 function getApiKey(): string {
   const key = process.env.TOOL_API_KEY;
   if (!key) throw new Error("TOOL_API_KEY not set");
   return key;
 }
 
+function requireString(args: Record<string, unknown>, field: string): string {
+  const val = args[field];
+  if (typeof val !== "string" || !val) {
+    throw new Error(`Missing required parameter: ${field}`);
+  }
+  return val;
+}
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // ── Tool Handlers ──────────────────────────────────────────────────────────
 
 async function runAudit(args: Record<string, unknown>): Promise<string> {
   const apiKey = getApiKey();
-  const url = args.url as string;
+  const url = requireString(args, "url");
   const strategy = (args.strategy as string) ?? "mobile";
   const categories = (args.categories as string[]) ?? [
     "performance",
@@ -88,7 +111,7 @@ async function runAudit(args: Record<string, unknown>): Promise<string> {
     params.append("category", cat.toUpperCase().replace(/-/g, "_"));
   }
 
-  const response = await fetch(`${PSI_API}?${params.toString()}`);
+  const response = await fetchWithTimeout(`${PSI_API}?${params.toString()}`);
 
   if (!response.ok) {
     const body = await response.text();
@@ -167,7 +190,7 @@ async function getCoreWebVitals(
   args: Record<string, unknown>,
 ): Promise<string> {
   const apiKey = getApiKey();
-  const url = args.url as string;
+  const url = requireString(args, "url");
   const formFactor = (args.form_factor as string) ?? "ALL";
 
   // Use CrUX API directly for field data
@@ -178,7 +201,7 @@ async function getCoreWebVitals(
     formFactor: formFactor.toUpperCase(),
   };
 
-  const response = await fetch(`${cruxUrl}?key=${apiKey}`, {
+  const response = await fetchWithTimeout(`${cruxUrl}?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -194,7 +217,7 @@ async function getCoreWebVitals(
         formFactor.toUpperCase() === "PHONE" ? "MOBILE" : "DESKTOP",
     });
 
-    const psiResponse = await fetch(`${PSI_API}?${params.toString()}`);
+    const psiResponse = await fetchWithTimeout(`${PSI_API}?${params.toString()}`);
     if (!psiResponse.ok) {
       const errorBody = await psiResponse.text();
       throw new Error(
@@ -303,16 +326,20 @@ rl.on("line", async (line: string) => {
   if (!line.trim()) return;
 
   try {
-    const msg = JSON.parse(line) as {
-      jsonrpc: string;
-      id?: number;
-      method: string;
-      params?: Record<string, unknown>;
-    };
+    const msg = JSON.parse(line) as Record<string, unknown>;
+
+    if (!msg.method || typeof msg.method !== "string") {
+      if (msg.id !== undefined) {
+        process.stdout.write(
+          JSON.stringify({ jsonrpc: "2.0", id: msg.id, error: { code: -32600, message: "Invalid request: missing method" } }) + "\n",
+        );
+      }
+      return;
+    }
 
     if (msg.id === undefined) return;
 
-    const result = await handleRequest(msg.method, msg.params ?? {});
+    const result = await handleRequest(msg.method, (msg.params ?? {}) as Record<string, unknown>);
     if (result !== undefined) {
       const response = JSON.stringify({
         jsonrpc: "2.0",

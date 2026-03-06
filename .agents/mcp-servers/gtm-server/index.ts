@@ -109,10 +109,20 @@ const TOOLS = [
 
 // ── API Helpers ─────────────────────────────────────────────────────────────
 
+const FETCH_TIMEOUT_MS = 30_000;
+
 function getAccessToken(): string {
   const token = process.env.TOOL_ACCESS_TOKEN;
   if (!token) throw new Error("TOOL_ACCESS_TOKEN not set");
   return token;
+}
+
+function requireString(args: Record<string, unknown>, field: string): string {
+  const val = args[field];
+  if (typeof val !== "string" || !val) {
+    throw new Error(`Missing required parameter: ${field}`);
+  }
+  return val;
 }
 
 function workspacePath(
@@ -129,31 +139,39 @@ async function apiRequest(
   options: RequestInit = {},
 ): Promise<unknown> {
   const token = getAccessToken();
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(options.headers as Record<string, string>),
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(
-      `GTM API error ${response.status}: ${body.slice(0, 500)}`,
-    );
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...(options.headers as Record<string, string>),
+      },
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `GTM API error ${response.status}: ${body.slice(0, 500)}`,
+      );
+    }
+
+    return response.json();
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return response.json();
 }
 
 // ── Tool Handlers ──────────────────────────────────────────────────────────
 
 async function listTags(args: Record<string, unknown>): Promise<string> {
   const path = workspacePath(
-    args.account_id as string,
-    args.container_id as string,
+    requireString(args, "account_id"),
+    requireString(args, "container_id"),
     args.workspace_id as string | undefined,
   );
 
@@ -163,13 +181,13 @@ async function listTags(args: Record<string, unknown>): Promise<string> {
 
 async function createTag(args: Record<string, unknown>): Promise<string> {
   const path = workspacePath(
-    args.account_id as string,
-    args.container_id as string,
+    requireString(args, "account_id"),
+    requireString(args, "container_id"),
   );
 
   const body: Record<string, unknown> = {
-    name: args.tag_name as string,
-    type: args.tag_type as string,
+    name: requireString(args, "tag_name"),
+    type: requireString(args, "tag_type"),
   };
 
   if (args.parameters) {
@@ -189,13 +207,13 @@ async function createTag(args: Record<string, unknown>): Promise<string> {
 
 async function createTrigger(args: Record<string, unknown>): Promise<string> {
   const path = workspacePath(
-    args.account_id as string,
-    args.container_id as string,
+    requireString(args, "account_id"),
+    requireString(args, "container_id"),
   );
 
   const body: Record<string, unknown> = {
-    name: args.trigger_name as string,
-    type: args.trigger_type as string,
+    name: requireString(args, "trigger_name"),
+    type: requireString(args, "trigger_type"),
   };
 
   if (args.filters) {
@@ -214,14 +232,14 @@ async function publishWorkspace(
   args: Record<string, unknown>,
 ): Promise<string> {
   const path = workspacePath(
-    args.account_id as string,
-    args.container_id as string,
-    args.workspace_id as string,
+    requireString(args, "account_id"),
+    requireString(args, "container_id"),
+    requireString(args, "workspace_id"),
   );
 
   const body: Record<string, unknown> = {};
-  if (args.version_name) {
-    body.name = args.version_name as string;
+  if (args.version_name && typeof args.version_name === "string") {
+    body.name = args.version_name;
   }
 
   // Create version from workspace
@@ -315,16 +333,20 @@ rl.on("line", async (line: string) => {
   if (!line.trim()) return;
 
   try {
-    const msg = JSON.parse(line) as {
-      jsonrpc: string;
-      id?: number;
-      method: string;
-      params?: Record<string, unknown>;
-    };
+    const msg = JSON.parse(line) as Record<string, unknown>;
+
+    if (!msg.method || typeof msg.method !== "string") {
+      if (msg.id !== undefined) {
+        process.stdout.write(
+          JSON.stringify({ jsonrpc: "2.0", id: msg.id, error: { code: -32600, message: "Invalid request: missing method" } }) + "\n",
+        );
+      }
+      return;
+    }
 
     if (msg.id === undefined) return;
 
-    const result = await handleRequest(msg.method, msg.params ?? {});
+    const result = await handleRequest(msg.method, (msg.params ?? {}) as Record<string, unknown>);
     if (result !== undefined) {
       const response = JSON.stringify({
         jsonrpc: "2.0",

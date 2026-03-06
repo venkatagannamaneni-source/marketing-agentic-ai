@@ -169,7 +169,27 @@ class StdioMCPConnection implements MCPConnection {
 
     return new Promise((resolve, reject) => {
       this.pendingRequests.set(id, { resolve, reject });
-      this.process!.stdin?.write(request + "\n");
+      try {
+        const ok = this.process!.stdin?.write(request + "\n");
+        if (ok === false) {
+          this.pendingRequests.delete(id);
+          reject(
+            new MCPConnectionError(
+              "Failed to write to MCP server stdin (backpressure)",
+              this.serverPath,
+            ),
+          );
+        }
+      } catch (err: unknown) {
+        this.pendingRequests.delete(id);
+        reject(
+          new MCPConnectionError(
+            `Failed to write to MCP server stdin: ${err instanceof Error ? err.message : String(err)}`,
+            this.serverPath,
+            err,
+          ),
+        );
+      }
     });
   }
 
@@ -334,10 +354,10 @@ export class MCPToolProvider implements ToolProvider {
         try {
           const cred = await this.credentialResolver.resolve(config.credentials_env);
           if (cred.accessToken) {
-            credentialEnv = { TOOL_ACCESS_TOKEN: cred.accessToken };
+            credentialEnv.TOOL_ACCESS_TOKEN = cred.accessToken;
           }
           if (cred.apiKey) {
-            credentialEnv = { TOOL_API_KEY: cred.apiKey };
+            credentialEnv.TOOL_API_KEY = cred.apiKey;
           }
         } catch (err: unknown) {
           this.logger.warn("mcp_credential_resolution_failed", {
@@ -437,21 +457,43 @@ export class MCPToolProvider implements ToolProvider {
     this.connections.clear();
   }
 
+  /** Tracks in-flight connection attempts to prevent duplicate connections. */
+  private readonly connectingPromises = new Map<string, Promise<StdioMCPConnection>>();
+
   private async getOrCreateConnection(
     serverPath: string,
     env: Record<string, string>,
   ): Promise<StdioMCPConnection> {
-    let conn = this.connections.get(serverPath);
-    if (conn?.connected) return conn;
+    // Return existing healthy connection
+    const existing = this.connections.get(serverPath);
+    if (existing?.connected) return existing;
 
+    // Deduplicate concurrent connection attempts
+    const inflight = this.connectingPromises.get(serverPath);
+    if (inflight) return inflight;
+
+    const promise = this.doConnect(serverPath, env);
+    this.connectingPromises.set(serverPath, promise);
+    try {
+      return await promise;
+    } finally {
+      this.connectingPromises.delete(serverPath);
+    }
+  }
+
+  private async doConnect(
+    serverPath: string,
+    env: Record<string, string>,
+  ): Promise<StdioMCPConnection> {
     // Clean up stale connection
-    if (conn) {
-      await conn.close();
+    const stale = this.connections.get(serverPath);
+    if (stale) {
+      await stale.close();
       this.connections.delete(serverPath);
     }
 
     // Create new connection
-    conn = new StdioMCPConnection(serverPath, this.logger, env);
+    const conn = new StdioMCPConnection(serverPath, this.logger, env);
 
     let lastError: unknown;
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
@@ -476,6 +518,9 @@ export class MCPToolProvider implements ToolProvider {
         }
       }
     }
+
+    // Clean up leaked process before throwing
+    await conn.close();
 
     throw new MCPConnectionError(
       `Failed to connect to MCP server after ${this.config.maxRetries + 1} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}`,

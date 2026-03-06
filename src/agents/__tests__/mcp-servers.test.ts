@@ -182,7 +182,7 @@ for (const server of SERVERS) {
         isError: boolean;
       };
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("Unknown tool");
+      expect(result.content[0]!.text).toContain("Unknown tool");
     });
 
     it("returns error when credentials are missing", async () => {
@@ -200,7 +200,7 @@ for (const server of SERVERS) {
         isError: boolean;
       };
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("Error:");
+      expect(result.content[0]!.text).toContain("Error:");
     });
 
     it("all tools have inputSchema", async () => {

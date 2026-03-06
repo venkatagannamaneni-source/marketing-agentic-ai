@@ -91,6 +91,8 @@ const TOOLS = [
 
 // ── API Helpers ─────────────────────────────────────────────────────────────
 
+const FETCH_TIMEOUT_MS = 30_000;
+
 function getAccessToken(): string {
   const token = process.env.TOOL_ACCESS_TOKEN;
   if (!token) throw new Error("TOOL_ACCESS_TOKEN not set");
@@ -101,42 +103,66 @@ function normalizePropertyId(id: string): string {
   return id.startsWith("properties/") ? id : `properties/${id}`;
 }
 
+function requireString(args: Record<string, unknown>, field: string): string {
+  const val = args[field];
+  if (typeof val !== "string" || !val) {
+    throw new Error(`Missing required parameter: ${field}`);
+  }
+  return val;
+}
+
+function requireArray(args: Record<string, unknown>, field: string): unknown[] {
+  const val = args[field];
+  if (!Array.isArray(val)) {
+    throw new Error(`Missing or invalid parameter: ${field} (expected array)`);
+  }
+  return val;
+}
+
 async function apiRequest(
   url: string,
   options: RequestInit = {},
 ): Promise<unknown> {
   const token = getAccessToken();
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(options.headers as Record<string, string>),
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(
-      `GA4 API error ${response.status}: ${body.slice(0, 500)}`,
-    );
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...(options.headers as Record<string, string>),
+      },
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `GA4 API error ${response.status}: ${body.slice(0, 500)}`,
+      );
+    }
+
+    return response.json();
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return response.json();
 }
 
 // ── Tool Handlers ──────────────────────────────────────────────────────────
 
 async function queryReport(args: Record<string, unknown>): Promise<string> {
-  const propertyId = normalizePropertyId(args.property_id as string);
-  const metrics = (args.metrics as string[]).map((name) => ({ name }));
+  const propertyId = normalizePropertyId(requireString(args, "property_id"));
+  const metrics = (requireArray(args, "metrics") as string[]).map((name) => ({ name }));
   const dimensions = (args.dimensions as string[] | undefined)?.map((name) => ({
     name,
   }));
 
   const body: Record<string, unknown> = {
     dateRanges: [
-      { startDate: args.start_date as string, endDate: args.end_date as string },
+      { startDate: requireString(args, "start_date"), endDate: requireString(args, "end_date") },
     ],
     metrics,
   };
@@ -151,7 +177,7 @@ async function queryReport(args: Record<string, unknown>): Promise<string> {
 }
 
 async function getRealtime(args: Record<string, unknown>): Promise<string> {
-  const propertyId = normalizePropertyId(args.property_id as string);
+  const propertyId = normalizePropertyId(requireString(args, "property_id"));
 
   const result = await apiRequest(
     `${GA4_DATA_API}/${propertyId}:runRealtimeReport`,
@@ -168,7 +194,7 @@ async function getRealtime(args: Record<string, unknown>): Promise<string> {
 }
 
 async function listEvents(args: Record<string, unknown>): Promise<string> {
-  const propertyId = normalizePropertyId(args.property_id as string);
+  const propertyId = normalizePropertyId(requireString(args, "property_id"));
 
   const [customDimensions, customMetrics] = await Promise.all([
     apiRequest(`${GA4_ADMIN_API}/${propertyId}/customDimensions`),
@@ -181,7 +207,7 @@ async function listEvents(args: Record<string, unknown>): Promise<string> {
 async function getConversionEvents(
   args: Record<string, unknown>,
 ): Promise<string> {
-  const propertyId = normalizePropertyId(args.property_id as string);
+  const propertyId = normalizePropertyId(requireString(args, "property_id"));
 
   const result = await apiRequest(
     `${GA4_ADMIN_API}/${propertyId}/keyEvents`,
@@ -260,17 +286,22 @@ rl.on("line", async (line: string) => {
   if (!line.trim()) return;
 
   try {
-    const msg = JSON.parse(line) as {
-      jsonrpc: string;
-      id?: number;
-      method: string;
-      params?: Record<string, unknown>;
-    };
+    const msg = JSON.parse(line) as Record<string, unknown>;
+
+    // Validate JSON-RPC message structure
+    if (!msg.method || typeof msg.method !== "string") {
+      if (msg.id !== undefined) {
+        process.stdout.write(
+          JSON.stringify({ jsonrpc: "2.0", id: msg.id, error: { code: -32600, message: "Invalid request: missing method" } }) + "\n",
+        );
+      }
+      return;
+    }
 
     // Notifications (no id) — no response needed
     if (msg.id === undefined) return;
 
-    const result = await handleRequest(msg.method, msg.params ?? {});
+    const result = await handleRequest(msg.method, (msg.params ?? {}) as Record<string, unknown>);
     if (result !== undefined) {
       const response = JSON.stringify({
         jsonrpc: "2.0",
