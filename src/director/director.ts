@@ -339,7 +339,7 @@ export class MarketingDirector {
 
     // Semantic review
     const existingReviews = await this.workspace.listReviews(taskId);
-    const { decision, reviewCost } =
+    const { decision, reviewCost, qualityScore } =
       await this.reviewEngine.evaluateTaskSemantic(
         task,
         execution.content,
@@ -351,6 +351,19 @@ export class MarketingDirector {
     // Apply decision side effects
     await this.applyDecision(taskId, decision);
 
+    // Persist quality score if available
+    if (qualityScore) {
+      try {
+        await this.workspace.writeQualityScore(qualityScore);
+      } catch (err: unknown) {
+        // Non-fatal — quality score persistence is supplementary
+        this.logger.warn("director_quality_score_write_failed", {
+          taskId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     const totalCost = execution.metadata.estimatedCost + reviewCost;
 
     this.logger.info("director_task_executed_and_reviewed", {
@@ -358,6 +371,7 @@ export class MarketingDirector {
       executionCost: execution.metadata.estimatedCost,
       reviewCost,
       totalCost,
+      qualityScore: qualityScore?.overallScore ?? null,
     });
 
     return { execution, decision, totalCost };
