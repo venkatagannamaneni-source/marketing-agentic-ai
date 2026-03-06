@@ -770,7 +770,12 @@ ${outputContent}`;
 
     const nextTasks: Task[] = [];
     if (action === "revise") {
-      nextTasks.push(this.createRevisionTask(task, revisionRequests));
+      nextTasks.push(this.createRevisionTask(
+        task,
+        revisionRequests,
+        semanticResult.summary,
+        allFindings,
+      ));
     }
 
     let escalation: Escalation | null = null;
@@ -967,10 +972,19 @@ ${outputContent}`;
 
   /**
    * Create a revision task from the original task and revision requests.
+   *
+   * Stores structured revision feedback in task.metadata so the prompt
+   * builder can render it in a dedicated <revision-feedback> section,
+   * separate from the original requirements.
+   *
+   * The requirements field still contains a human-readable summary for
+   * backward compatibility, but the prompt builder prefers metadata.
    */
   private createRevisionTask(
     original: Task,
     revisionRequests: readonly RevisionRequest[],
+    reviewSummary?: string | null,
+    reviewFindings?: readonly ReviewFinding[],
   ): Task {
     const now = new Date().toISOString();
     const taskId = generateTaskId(original.to);
@@ -978,6 +992,11 @@ ${outputContent}`;
     const revisionDetails = revisionRequests
       .map((r) => `- [${r.priority}] ${r.description}`)
       .join("\n");
+
+    // Extract the original requirements (strip any prior "REVISION REQUESTED" prefix)
+    const originalRequirements = original.metadata.originalRequirements
+      ? String(original.metadata.originalRequirements)
+      : original.requirements.replace(/^REVISION REQUESTED:[\s\S]*?\n\nOriginal requirements:\s*/m, "");
 
     return {
       id: taskId,
@@ -999,7 +1018,7 @@ ${outputContent}`;
           description: "Previous output to revise",
         },
       ],
-      requirements: `REVISION REQUESTED:\n${revisionDetails}\n\nOriginal requirements: ${original.requirements}`,
+      requirements: `REVISION REQUESTED:\n${revisionDetails}\n\nOriginal requirements: ${originalRequirements}`,
       output: original.output,
       next: original.next,
       tags: [...original.tags, "revision"],
@@ -1007,6 +1026,19 @@ ${outputContent}`;
         ...original.metadata,
         originalTaskId: original.id,
         revisionOf: original.id,
+        originalRequirements: originalRequirements,
+        revisionFeedback: revisionRequests.map((r) => ({
+          description: r.description,
+          priority: r.priority,
+        })),
+        reviewSummary: reviewSummary ?? null,
+        reviewFindings: reviewFindings
+          ? reviewFindings.map((f) => ({
+              section: f.section,
+              severity: f.severity,
+              description: f.description,
+            }))
+          : null,
       },
     };
   }
