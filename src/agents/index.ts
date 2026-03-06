@@ -69,3 +69,12 @@ export type {
   ToolInvocationRecord,
 } from "./executor.ts";
 export { AgentExecutor, DEFAULT_EXECUTOR_CONFIG } from "./executor.ts";
+
+// ── Pipeline Template Registry ──────────────────────────────────────────
+export {
+  PipelineTemplateRegistry,
+  PipelineTemplateRegistryError,
+  type PipelineTemplateRegistryData,
+  type PipelineTemplateData,
+  type PipelineStepData,
+} from "./pipeline-template-registry.ts";

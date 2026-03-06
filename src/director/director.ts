@@ -25,8 +25,11 @@ import { DIRECTOR_SYSTEM_PROMPT, buildDirectorPrompt } from "./system-prompt.ts"
 import { GoalDecomposer } from "./goal-decomposer.ts";
 import { PipelineFactory } from "./pipeline-factory.ts";
 import { ReviewEngine } from "./review-engine.ts";
+import type { SemanticReviewConfig } from "./review-engine.ts";
+import type { QualityScorer } from "./quality-scorer.ts";
 import { EscalationEngine } from "./escalation.ts";
-import { routeGoal } from "./squad-router.ts";
+import { routeGoal, routeGoalFromRegistry } from "./squad-router.ts";
+import type { RoutingRegistry } from "./routing-registry.ts";
 import { parseLearnings } from "../workspace/markdown.ts";
 import type { ClaudeClient } from "../agents/claude-client.ts";
 import { AgentExecutor } from "../agents/executor.ts";
@@ -60,6 +63,7 @@ export class MarketingDirector {
   private readonly skillSquadMap: Record<string, string | null>;
   private readonly foundationSkill: string;
   private readonly directorPrompt: string;
+  private readonly routingRegistry?: RoutingRegistry;
 
   constructor(
     private readonly workspace: WorkspaceManager,
@@ -69,6 +73,8 @@ export class MarketingDirector {
     humanReviewManager?: HumanReviewManager,
     logger?: Logger,
     registry?: SkillRegistry,
+    qualityScorer?: QualityScorer,
+    routingRegistry?: RoutingRegistry,
   ) {
     this.config = { ...DEFAULT_DIRECTOR_CONFIG, ...config };
     this.logger = (logger ?? NULL_LOGGER).child({ module: "director" });
@@ -85,8 +91,9 @@ export class MarketingDirector {
       : DIRECTOR_SYSTEM_PROMPT;
     this.goalDecomposer = new GoalDecomposer(PIPELINE_TEMPLATES, registry);
     this.pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES, registry);
-    this.reviewEngine = new ReviewEngine(this.config, client);
+    this.reviewEngine = new ReviewEngine(this.config, client, qualityScorer);
     this.escalationEngine = new EscalationEngine(this.config);
+    this.routingRegistry = routingRegistry;
   }
 
   // ── Goal Management ──────────────────────────────────────────────────────
@@ -298,8 +305,13 @@ export class MarketingDirector {
   }
 
   /**
-   * Execute a task via the Agent Executor, then run semantic review via Claude Opus.
+   * Execute a task via the Agent Executor, then run semantic review via Claude.
    * Requires ClaudeClient and ExecutorConfig to be provided at construction time.
+   *
+   * Accepts an optional SemanticReviewConfig to control review depth:
+   * - "quick": Structural only (no API call for review)
+   * - "standard": Structural + Sonnet review (cost-effective)
+   * - "deep": Structural + Opus review with SKILL.md context (most thorough)
    *
    * Returns the execution result, director decision, and total cost
    * (execution + semantic review — EC-4).
@@ -307,6 +319,7 @@ export class MarketingDirector {
   async executeAndReviewTask(
     taskId: string,
     budgetState?: BudgetState,
+    reviewConfig?: SemanticReviewConfig,
   ): Promise<{
     execution: ExecutionResult;
     decision: DirectorDecision;
@@ -330,16 +343,30 @@ export class MarketingDirector {
 
     // Semantic review
     const existingReviews = await this.workspace.listReviews(taskId);
-    const { decision, reviewCost } =
+    const { decision, reviewCost, qualityScore } =
       await this.reviewEngine.evaluateTaskSemantic(
         task,
         execution.content,
         existingReviews,
         budgetState,
+        reviewConfig,
       );
 
     // Apply decision side effects
     await this.applyDecision(taskId, decision);
+
+    // Persist quality score if available
+    if (qualityScore) {
+      try {
+        await this.workspace.writeQualityScore(qualityScore);
+      } catch (err: unknown) {
+        // Non-fatal — quality score persistence is supplementary
+        this.logger.warn("director_quality_score_write_failed", {
+          taskId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     const totalCost = execution.metadata.estimatedCost + reviewCost;
 
@@ -348,6 +375,7 @@ export class MarketingDirector {
       executionCost: execution.metadata.estimatedCost,
       reviewCost,
       totalCost,
+      qualityScore: qualityScore?.overallScore ?? null,
     });
 
     return { execution, decision, totalCost };
@@ -515,6 +543,9 @@ export class MarketingDirector {
    * Route a goal category to the appropriate squad sequence.
    */
   routeGoal(category: GoalCategory): RoutingDecision {
+    if (this.routingRegistry) {
+      return routeGoalFromRegistry(category, this.routingRegistry);
+    }
     return routeGoal(category);
   }
 

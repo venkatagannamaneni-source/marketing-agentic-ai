@@ -95,6 +95,30 @@ export function createReviewStepDefinition(): PipelineDefinition {
   });
 }
 
+export function createAgentReviewChainDefinition(): PipelineDefinition {
+  return createTestDefinition({
+    id: "review-chain-pipeline",
+    name: "Copywriting Review Chain",
+    steps: [
+      { type: "sequential", skill: "copywriting" as SkillName },
+      { type: "review", reviewer: "copy-editing" as SkillName },
+      { type: "review", reviewer: "page-cro" as SkillName },
+      { type: "review", reviewer: "director" as const },
+    ],
+  });
+}
+
+export function createAgentReviewOnlyDefinition(): PipelineDefinition {
+  return createTestDefinition({
+    id: "agent-review-only",
+    name: "Agent Review Only",
+    steps: [
+      { type: "sequential", skill: "copywriting" as SkillName },
+      { type: "review", reviewer: "copy-editing" as SkillName },
+    ],
+  });
+}
+
 // ── Concurrency Tracking Client ─────────────────────────────────────────────
 
 export interface ConcurrencyTracker {

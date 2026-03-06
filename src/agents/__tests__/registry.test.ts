@@ -66,8 +66,8 @@ describe("getDownstreamSkills", () => {
 });
 
 describe("PIPELINE_TEMPLATES", () => {
-  it("has 8 pipeline templates", () => {
-    expect(PIPELINE_TEMPLATES).toHaveLength(8);
+  it("has 9 pipeline templates", () => {
+    expect(PIPELINE_TEMPLATES).toHaveLength(9);
   });
 
   it("all templates reference valid skills", () => {
@@ -76,6 +76,11 @@ describe("PIPELINE_TEMPLATES", () => {
         if (Array.isArray(step)) {
           for (const skill of step) {
             expect(SKILL_NAMES).toContain(skill);
+          }
+        } else if (typeof step === "object" && step !== null && "review" in step) {
+          // Review steps: reviewer can be a skill name or "director"
+          if (step.review !== "director") {
+            expect((SKILL_NAMES as readonly string[])).toContain(step.review);
           }
         } else {
           expect((SKILL_NAMES as readonly string[])).toContain(step as string);

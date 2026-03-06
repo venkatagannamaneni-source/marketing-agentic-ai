@@ -269,7 +269,7 @@ export class SequentialPipelineEngine {
           inputPaths,
         );
       case "review":
-        return this.handleReviewStep(step, stepIndex);
+        return this.handleReviewStep(step, stepIndex, totalSteps, run, config, inputPaths);
     }
   }
 
@@ -530,21 +530,125 @@ export class SequentialPipelineEngine {
 
   // ── Review Step ─────────────────────────────────────────────────────────
 
-  private handleReviewStep(
+  /**
+   * Handle a review step. If the reviewer is "director", pause the pipeline
+   * for human/director intervention. If the reviewer is an agent skill,
+   * execute that agent as a reviewer — passing the previous step's output
+   * as input and forwarding the reviewer's output downstream.
+   */
+  private async handleReviewStep(
     step: {
       readonly type: "review";
       readonly reviewer: SkillName | "director";
     },
     stepIndex: number,
-  ): StepResult {
+    totalSteps: number,
+    run: PipelineRun,
+    config: PipelineEngineConfig,
+    inputPaths: readonly string[],
+  ): Promise<StepResult> {
+    // Director reviews pause for human intervention
+    if (step.reviewer === "director") {
+      return {
+        stepIndex,
+        step,
+        tasks: [],
+        executionResults: [],
+        outputPaths: [],
+        status: "paused",
+        durationMs: 0,
+      };
+    }
+
+    // Agent reviewer: execute the reviewer skill with previous output as input
+    const stepStart = Date.now();
+    const skill = step.reviewer;
+
+    let tasks: readonly Task[];
+    try {
+      tasks = this.factory.createTasksForStep(
+        step,
+        stepIndex,
+        totalSteps,
+        run,
+        config.goalDescription,
+        config.priority,
+        inputPaths,
+      );
+    } catch (err: unknown) {
+      return {
+        stepIndex,
+        step,
+        tasks: [],
+        executionResults: [],
+        outputPaths: [],
+        status: "failed",
+        durationMs: Date.now() - stepStart,
+        error: new PipelineError(
+          `Failed to create review task for step ${stepIndex}: ${err instanceof Error ? err.message : String(err)}`,
+          "TASK_CREATION_FAILED",
+          run.id,
+          stepIndex,
+          err instanceof Error ? err : undefined,
+        ),
+      };
+    }
+
+    const task = tasks[0]!;
+    run.taskIds.push(task.id);
+
+    try {
+      await this.workspace.writeTask(task);
+    } catch (err: unknown) {
+      return {
+        stepIndex,
+        step,
+        tasks: [task],
+        executionResults: [],
+        outputPaths: [],
+        status: "failed",
+        durationMs: Date.now() - stepStart,
+        error: new PipelineError(
+          `Failed to persist review task ${task.id}: ${err instanceof Error ? err.message : String(err)}`,
+          "WORKSPACE_ERROR",
+          run.id,
+          stepIndex,
+          err instanceof Error ? err : undefined,
+        ),
+      };
+    }
+
+    const result = await this.executor.execute(task, {
+      signal: config.signal,
+    });
+
+    if (result.status === "failed") {
+      return {
+        stepIndex,
+        step,
+        tasks: [task],
+        executionResults: [result],
+        outputPaths: [],
+        status: "failed",
+        durationMs: Date.now() - stepStart,
+        error: new PipelineError(
+          `Review step ${stepIndex} failed: reviewer "${skill}" execution failed — ${result.error?.message ?? "unknown reason"}`,
+          "STEP_FAILED",
+          run.id,
+          stepIndex,
+          result.error,
+        ),
+      };
+    }
+
     return {
       stepIndex,
       step,
-      tasks: [],
-      executionResults: [],
-      outputPaths: [],
-      status: "paused",
-      durationMs: 0,
+      tasks: [task],
+      executionResults: [result],
+      outputPaths: this.collectOutputPaths([result]),
+      status: "completed",
+      durationMs: Date.now() - stepStart,
     };
   }
 

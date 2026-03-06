@@ -1,0 +1,95 @@
+# Pipeline Templates
+# Externalized from src/agents/registry.ts PIPELINE_TEMPLATES.
+# Format mirrors PROJECT_PROPOSAL.md Section 4.
+#
+# Step types:
+#   - skill: <name>           → sequential step (one skill)
+#   - parallel: [a, b, c]     → parallel step (multiple skills run concurrently)
+#   - review: <name|director> → review step (reviewer examines previous output)
+
+pipelines:
+  - name: "Content Production"
+    description: "Weekly content pipeline from strategy to publication"
+    trigger: weekly
+    defaultPriority: P2
+    steps:
+      - skill: content-strategy
+      - skill: copywriting
+      - skill: copy-editing
+      - skill: seo-audit
+      - skill: schema-markup
+
+  - name: "Page Launch"
+    description: "Optimize and instrument a new page"
+    trigger: "new page created"
+    defaultPriority: P1
+    steps:
+      - skill: copywriting
+      - skill: page-cro
+      - skill: ab-test-setup
+      - skill: analytics-tracking
+
+  - name: "Product Launch"
+    description: "Full launch campaign across channels"
+    trigger: "launch date approaching"
+    defaultPriority: P0
+    steps:
+      - skill: launch-strategy
+      - parallel: [copywriting, email-sequence, social-content, paid-ads]
+
+  - name: "Conversion Sprint"
+    description: "Monthly CRO cycle with measurement"
+    trigger: monthly
+    defaultPriority: P1
+    steps:
+      - skill: page-cro
+      - skill: copywriting
+      - skill: ab-test-setup
+      - skill: analytics-tracking
+
+  - name: "Competitive Response"
+    description: "React to competitor launches"
+    trigger: "competitor launch detected"
+    defaultPriority: P1
+    steps:
+      - skill: competitor-alternatives
+      - skill: copywriting
+      - skill: pricing-strategy
+      - skill: paid-ads
+
+  - name: "Retention Sprint"
+    description: "Address churn with activation improvements"
+    trigger: "churn spike detected"
+    defaultPriority: P1
+    steps:
+      - skill: onboarding-cro
+      - skill: email-sequence
+      - skill: paywall-upgrade-cro
+      - skill: ab-test-setup
+
+  - name: "SEO Cycle"
+    description: "Monthly SEO audit and response"
+    trigger: monthly
+    defaultPriority: P2
+    steps:
+      - skill: seo-audit
+      - parallel: [programmatic-seo, schema-markup, content-strategy]
+
+  - name: "Outreach Campaign"
+    description: "Cold email campaign with testing"
+    trigger: "new prospect list available"
+    defaultPriority: P2
+    steps:
+      - skill: cold-email
+      - skill: ab-test-setup
+      - skill: analytics-tracking
+
+  - name: "Copywriting Review Chain"
+    description: "Multi-pass review pipeline"
+    trigger: manual
+    defaultPriority: P1
+    steps:
+      - skill: copywriting
+      - review: copy-editing
+      - review: page-cro
+      - review: director

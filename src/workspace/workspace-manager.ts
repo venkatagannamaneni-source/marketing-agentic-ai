@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile, readdir, unlink, stat } from "node:fs/promises";
 import { resolve, relative, dirname } from "node:path";
 import type { WorkspaceConfig, WorkspacePaths, LearningEntry } from "../types/workspace.ts";
+import type { QualityScore } from "../types/quality.ts";
 import type { Task, TaskStatus, TaskFilter } from "../types/task.ts";
 import { validateTransition } from "../types/task.ts";
 import type { Review } from "../types/review.ts";
@@ -98,6 +99,11 @@ export interface WorkspaceManager {
   writeScheduleState(scheduleId: string, state: ScheduleState): Promise<void>;
   readScheduleState(scheduleId: string): Promise<ScheduleState | null>;
   listScheduleStates(): Promise<ScheduleState[]>;
+
+  // Quality score operations
+  writeQualityScore(score: QualityScore): Promise<void>;
+  readQualityScore(taskId: string): Promise<QualityScore | null>;
+  listQualityScores(): Promise<QualityScore[]>;
 }
 
 // ── Path Builder ─────────────────────────────────────────────────────────────
@@ -129,6 +135,9 @@ export function createWorkspacePaths(rootDir: string): WorkspacePaths {
     schedules: `${rootDir}/schedules`,
     scheduleStateFile: (scheduleId: string) =>
       `${rootDir}/schedules/${scheduleId}-state.json`,
+    qualityScores: `${rootDir}/metrics/quality`,
+    qualityScoreFile: (taskId: string) =>
+      `${rootDir}/metrics/quality/${taskId}.json`,
   };
 }
 
@@ -151,6 +160,9 @@ export class FileSystemWorkspaceManager implements WorkspaceManager {
 
     // Create reviews/human/ subdirectory for human review items
     await mkdir(resolve(this.rootDir, "reviews", "human"), { recursive: true });
+
+    // Create metrics/quality/ subdirectory for quality scores
+    await mkdir(resolve(this.rootDir, "metrics", "quality"), { recursive: true });
 
     // Create outputs/{squad}/{skill}/ for every skill
     for (const squad of SQUAD_NAMES) {
@@ -587,6 +599,51 @@ export class FileSystemWorkspaceManager implements WorkspaceManager {
       }
     }
     return states;
+  }
+
+  // ── Quality Score Operations ────────────────────────────────────────────
+
+  async writeQualityScore(score: QualityScore): Promise<void> {
+    const content = JSON.stringify(score, null, 2);
+    await this.writeFile(`metrics/quality/${score.taskId}.json`, content);
+  }
+
+  async readQualityScore(taskId: string): Promise<QualityScore | null> {
+    try {
+      const content = await this.readFile(`metrics/quality/${taskId}.json`);
+      return JSON.parse(content) as QualityScore;
+    } catch (err: unknown) {
+      if (err instanceof WorkspaceError && err.code === "NOT_FOUND") {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  async listQualityScores(): Promise<QualityScore[]> {
+    const absPath = this.resolveSafe("metrics/quality");
+    let entries: string[];
+    try {
+      entries = await readdir(absPath);
+    } catch (err: unknown) {
+      if (isErrnoException(err) && err.code === "ENOENT") {
+        return [];
+      }
+      throw err;
+    }
+
+    const scores: QualityScore[] = [];
+    for (const entry of entries) {
+      if (entry.endsWith(".json")) {
+        try {
+          const content = await this.readFile(`metrics/quality/${entry}`);
+          scores.push(JSON.parse(content) as QualityScore);
+        } catch {
+          // Skip malformed score files
+        }
+      }
+    }
+    return scores;
   }
 
   // ── Path Safety ─────────────────────────────────────────────────────────

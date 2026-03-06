@@ -50,6 +50,8 @@ export type {
   QualityThreshold,
   SkillDimensionCriteria,
   SkillQualityCriteria,
+  ConsistencyDimension,
+  ConsistencyFinding,
 } from "./types/index.ts";
 
 // ── Type Constants ────────────────────────────────────────────────────────────
@@ -167,6 +169,12 @@ export {
   type ToolInvocationRecord,
   AgentExecutor,
   DEFAULT_EXECUTOR_CONFIG,
+  // Pipeline Template Registry
+  PipelineTemplateRegistry,
+  PipelineTemplateRegistryError,
+  type PipelineTemplateRegistryData,
+  type PipelineTemplateData,
+  type PipelineStepData,
 } from "./agents/index.ts";
 
 // ── Director ─────────────────────────────────────────────────────────────────
@@ -186,6 +194,11 @@ export type {
   DirectorConfig,
   SemanticReviewResult,
   QualityReviewResult,
+  ReviewDepth,
+  SemanticReviewConfig,
+  LearningValidationResult,
+  LearningEffectivenessReport,
+  ConsistencyResult,
 } from "./director/index.ts";
 
 export {
@@ -194,11 +207,17 @@ export {
   ESCALATION_REASONS,
   BUDGET_LEVELS,
   DEFAULT_DIRECTOR_CONFIG,
+  DEFAULT_SEMANTIC_REVIEW_CONFIG,
   DIRECTOR_SYSTEM_PROMPT,
   buildDirectorPrompt,
   routeGoal,
+  routeGoalFromRegistry,
   selectSkills,
   ROUTING_RULES,
+  RoutingRegistry,
+  RoutingRegistryError,
+  type RoutingRegistryData,
+  type RoutingRuleData,
   GoalDecomposer,
   GOAL_CATEGORY_TEMPLATE_MAP,
   PipelineFactory,
@@ -211,6 +230,8 @@ export {
   DEFAULT_SKILL_CRITERIA,
   getSkillCriteria,
   resolveThreshold,
+  LearningValidator,
+  ConsistencyChecker,
 } from "./director/index.ts";
 
 // ── Pipeline Engine ──────────────────────────────────────────────────────────
@@ -272,6 +293,8 @@ export {
   EventBus,
   DEFAULT_EVENT_MAPPINGS,
   createWebhookServer,
+  EventRegistry,
+  EventRegistryError,
 } from "./events/index.ts";
 
 export type {
@@ -286,6 +309,10 @@ export type {
   WebhookServerConfig,
   WebhookServer,
   WebhookStats,
+  EventRegistryData,
+  EventMappingConfig,
+  EventCondition,
+  ConditionOperator,
 } from "./events/index.ts";
 
 // ── Scheduler ───────────────────────────────────────────────────────────────
@@ -302,6 +329,10 @@ export {
   CronParseError,
   type CronFields,
   DEFAULT_SCHEDULES,
+  ScheduleRegistry,
+  ScheduleRegistryError,
+  type ScheduleRegistryData,
+  type ScheduleEntryData,
 } from "./scheduler/index.ts";
 
 // ── BullMQ Adapters ─────────────────────────────────────────────────────────

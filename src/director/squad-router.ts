@@ -1,5 +1,6 @@
 import type { SkillName } from "../types/agent.ts";
 import type { GoalCategory, RoutingDecision, SquadRoute } from "./types.ts";
+import type { RoutingRegistry } from "./routing-registry.ts";
 
 // ── Routing Rules ────────────────────────────────────────────────────────────
 // Static config encoding the Director decision rules from PROJECT_PROPOSAL.md.
@@ -119,6 +120,25 @@ export const ROUTING_RULES: Record<GoalCategory, readonly SquadRoute[]> = {
  */
 export function routeGoal(category: GoalCategory): RoutingDecision {
   const routes = ROUTING_RULES[category];
+  return {
+    goalCategory: category,
+    routes,
+    measureSquadFinal: true,
+  };
+}
+
+/**
+ * Route a goal category using a RoutingRegistry (YAML-driven).
+ * Falls back to hardcoded ROUTING_RULES if the registry has no routes for the category.
+ */
+export function routeGoalFromRegistry(
+  category: GoalCategory,
+  registry: RoutingRegistry,
+): RoutingDecision {
+  const routes = registry.routeGoal(category);
+  if (routes.length === 0) {
+    return routeGoal(category);
+  }
   return {
     goalCategory: category,
     routes,

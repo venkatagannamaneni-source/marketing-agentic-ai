@@ -13,6 +13,16 @@ export type {
 // ── Default Mappings ────────────────────────────────────────────────────────
 export { DEFAULT_EVENT_MAPPINGS } from "./default-mappings.ts";
 
+// ── Event Registry ──────────────────────────────────────────────────────────
+export {
+  EventRegistry,
+  EventRegistryError,
+  type EventRegistryData,
+  type EventMappingConfig,
+  type EventCondition,
+  type ConditionOperator,
+} from "./event-registry.ts";
+
 // ── Webhook Server ──────────────────────────────────────────────────────────
 export { createWebhookServer } from "./webhook-server.ts";
 export type {

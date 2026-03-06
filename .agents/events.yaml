@@ -1,0 +1,60 @@
+# Event-to-pipeline mappings
+# Converts external system events into pipeline executions.
+# Internal events (budget_warning, budget_critical, agent_failure, pipeline_blocked)
+# are intentionally excluded — they are emitted for logging/observability only.
+# Users can add custom mappings for internal events if desired.
+
+mappings:
+  - eventType: traffic_drop
+    pipelineTemplate: "SEO Cycle"
+    priority: P1
+    cooldownMs: 3600000
+    condition:
+      field: "percentageDrop"
+      operator: "gt"
+      value: 20
+    description: "Trigger SEO cycle on significant traffic drop (>20%)"
+
+  - eventType: conversion_drop
+    pipelineTemplate: "Conversion Sprint"
+    priority: P0
+    cooldownMs: 3600000
+    condition:
+      field: "percentageDrop"
+      operator: "gt"
+      value: 10
+    description: "Trigger CRO sprint on conversion drop (>10%)"
+
+  - eventType: competitor_launch
+    pipelineTemplate: "Competitive Response"
+    priority: P1
+    cooldownMs: 86400000
+    description: "Respond to competitor product launch (24h cooldown)"
+
+  - eventType: new_feature_shipped
+    pipelineTemplate: "Page Launch"
+    priority: P1
+    cooldownMs: 300000
+    description: "Launch page for new feature (5min debounce for rapid deploys)"
+
+  - eventType: new_blog_post
+    pipelineTemplate: "Content Production"
+    priority: P2
+    cooldownMs: 300000
+    description: "Promote new blog post through content pipeline"
+
+  - eventType: email_bounce_spike
+    pipelineTemplate: "Retention Sprint"
+    priority: P1
+    cooldownMs: 3600000
+    condition:
+      field: "percentageSpike"
+      operator: "gt"
+      value: 15
+    description: "Trigger retention sprint on email bounce spike (>15%)"
+
+  - eventType: ab_test_significant
+    pipelineTemplate: "Conversion Sprint"
+    priority: P1
+    cooldownMs: 300000
+    description: "Act on statistically significant A/B test results"

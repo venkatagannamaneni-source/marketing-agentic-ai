@@ -42,6 +42,12 @@ export class PipelineFactory {
           skills: step as readonly SkillName[],
         };
       }
+      if (typeof step === "object" && step !== null && "review" in step) {
+        return {
+          type: "review" as const,
+          reviewer: step.review as SkillName | "director",
+        };
+      }
       return { type: "sequential" as const, skill: step as SkillName };
     });
 
@@ -118,7 +124,56 @@ export class PipelineFactory {
     inputPaths: readonly string[],
   ): readonly Task[] {
     if (step.type === "review") {
-      return [];
+      // Director reviews don't create tasks — the pipeline pauses
+      if (step.reviewer === "director") {
+        return [];
+      }
+      // Agent reviewer: create a review task for the reviewer skill
+      const skill = step.reviewer;
+      const now = new Date().toISOString();
+      const isLastStep = stepIndex === totalSteps - 1;
+      const nextAction: TaskNext = isLastStep
+        ? { type: "director_review" }
+        : { type: "pipeline_continue", pipelineId: run.id };
+
+      const taskId = generateTaskId(skill);
+      const squad = this.skillSquadMap[skill];
+      const outputPath = squad
+        ? `outputs/${squad}/${skill}/${taskId}.md`
+        : `outputs/foundation/${skill}/${taskId}.md`;
+
+      return [{
+        id: taskId,
+        createdAt: now,
+        updatedAt: now,
+        from: "director" as const,
+        to: skill,
+        priority,
+        deadline: null,
+        status: "pending" as const,
+        revisionCount: 0,
+        goalId: run.goalId,
+        pipelineId: run.id,
+        goal: goalDescription,
+        inputs: [
+          {
+            path: "context/product-marketing-context.md",
+            description: "Product context",
+          },
+          ...inputPaths.map((p) => ({
+            path: p,
+            description: "Output from previous step to review",
+          })),
+        ],
+        requirements: `Review and improve the previous step's output as part of pipeline "${run.pipelineId}". Apply ${skill} best practices for goal: ${goalDescription}`,
+        output: {
+          path: outputPath,
+          format: "Markdown per SKILL.md specification",
+        },
+        next: nextAction,
+        tags: [run.pipelineId, skill, "review"],
+        metadata: { stepIndex, pipelineRunId: run.id, isReview: true },
+      } satisfies Task];
     }
 
     const now = new Date().toISOString();

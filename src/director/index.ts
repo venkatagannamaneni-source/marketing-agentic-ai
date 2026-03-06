@@ -27,7 +27,15 @@ export {
 export { DIRECTOR_SYSTEM_PROMPT, buildDirectorPrompt } from "./system-prompt.ts";
 
 // ── Squad Router ─────────────────────────────────────────────────────────────
-export { routeGoal, selectSkills, ROUTING_RULES } from "./squad-router.ts";
+export { routeGoal, routeGoalFromRegistry, selectSkills, ROUTING_RULES } from "./squad-router.ts";
+
+// ── Routing Registry ─────────────────────────────────────────────────────────
+export {
+  RoutingRegistry,
+  RoutingRegistryError,
+  type RoutingRegistryData,
+  type RoutingRuleData,
+} from "./routing-registry.ts";
 
 // ── Goal Decomposer ─────────────────────────────────────────────────────────
 export {
@@ -39,8 +47,13 @@ export {
 export { PipelineFactory } from "./pipeline-factory.ts";
 
 // ── Review Engine ────────────────────────────────────────────────────────────
-export { ReviewEngine } from "./review-engine.ts";
-export type { SemanticReviewResult, QualityReviewResult } from "./review-engine.ts";
+export { ReviewEngine, DEFAULT_SEMANTIC_REVIEW_CONFIG } from "./review-engine.ts";
+export type {
+  SemanticReviewResult,
+  QualityReviewResult,
+  ReviewDepth,
+  SemanticReviewConfig,
+} from "./review-engine.ts";
 
 // ── Escalation Engine ────────────────────────────────────────────────────────
 export { EscalationEngine } from "./escalation.ts";
@@ -55,6 +68,17 @@ export {
   getSkillCriteria,
   resolveThreshold,
 } from "./quality-criteria.ts";
+
+// ── Learning Validator ──────────────────────────────────────────────────────
+export { LearningValidator } from "./learning-validator.ts";
+export type {
+  LearningValidationResult,
+  LearningEffectivenessReport,
+} from "./learning-validator.ts";
+
+// ── Consistency Checker ──────────────────────────────────────────────────────
+export { ConsistencyChecker } from "./consistency-checker.ts";
+export type { ConsistencyResult } from "./consistency-checker.ts";
 
 // ── Marketing Director ───────────────────────────────────────────────────────
 export { MarketingDirector, generateGoalId } from "./director.ts";

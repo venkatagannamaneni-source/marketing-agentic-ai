@@ -1,4 +1,5 @@
 import type { SquadName, SkillName } from "./agent.ts";
+import type { QualityScore } from "./quality.ts";
 
 // ── Workspace Directories ────────────────────────────────────────────────────
 
@@ -43,6 +44,8 @@ export interface WorkspacePaths {
   goalPlanFile(goalId: string): string;
   readonly schedules: string;
   scheduleStateFile(scheduleId: string): string;
+  readonly qualityScores: string;
+  qualityScoreFile(taskId: string): string;
 }
 
 // ── Learning Entry (for memory/learnings.md) ─────────────────────────────────

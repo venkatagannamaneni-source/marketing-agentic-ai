@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { SkillName } from "../types/agent.ts";
 import { SKILL_SQUAD_MAP } from "../types/agent.ts";
 import type { Task } from "../types/task.ts";
@@ -22,12 +24,43 @@ import type { ClaudeClient } from "../agents/claude-client.ts";
 import { MODEL_MAP, estimateCost } from "../agents/claude-client.ts";
 import type { QualityScore, SkillQualityCriteria } from "../types/quality.ts";
 import type { QualityScorer } from "./quality-scorer.ts";
+import { getSkillCriteria } from "./quality-criteria.ts";
+
+// ── Review Depth ────────────────────────────────────────────────────────────
+
+/**
+ * Controls how deeply the semantic review analyzes the output:
+ * - "quick": Structural validation only — no API call (fastest, free)
+ * - "standard": Structural + Sonnet semantic review (balanced cost/quality)
+ * - "deep": Structural + Opus semantic review with full SKILL.md context (most thorough)
+ */
+export type ReviewDepth = "quick" | "standard" | "deep";
+
+// ── Semantic Review Config ──────────────────────────────────────────────────
+
+export interface SemanticReviewConfig {
+  /** Review depth: quick (structural only), standard (sonnet), deep (opus + SKILL.md) */
+  readonly depth: ReviewDepth;
+  /** Project root for loading SKILL.md files. Required for "deep" depth. */
+  readonly projectRoot?: string;
+  /** Maximum tokens for the review response */
+  readonly maxResponseTokens?: number;
+}
+
+export const DEFAULT_SEMANTIC_REVIEW_CONFIG: SemanticReviewConfig = {
+  depth: "deep",
+  maxResponseTokens: 4096,
+};
 
 // ── Semantic Review Result ──────────────────────────────────────────────────
 
 export interface SemanticReviewResult {
   readonly decision: DirectorDecision;
   readonly reviewCost: number;
+  /** The review depth that was actually used (may differ from requested if client unavailable) */
+  readonly reviewDepth: ReviewDepth;
+  /** Dimensional quality score, present when a QualityScorer is wired in */
+  readonly qualityScore?: QualityScore;
 }
 
 // ── Review Engine ────────────────────────────────────────────────────────────
@@ -39,10 +72,31 @@ const VALID_SEVERITIES: ReadonlySet<string> = new Set<string>([
   "suggestion",
 ]);
 
+const VALID_VERDICTS: ReadonlySet<string> = new Set<string>([
+  "APPROVE",
+  "REVISE",
+  "REJECT",
+]);
+
 export interface QualityReviewResult {
   readonly decision: DirectorDecision;
   readonly qualityScore: QualityScore;
   readonly reviewCost: number;
+}
+
+/**
+ * Internal structured response from Claude's semantic review.
+ * Contains the parsed verdict, findings, and revision instructions.
+ */
+interface SemanticReviewResponse {
+  readonly findings: ReviewFinding[];
+  readonly cost: number;
+  /** Claude's recommended verdict, or null if parsing failed / legacy format */
+  readonly verdict: ReviewVerdict | null;
+  /** Specific revision instructions for the agent, or null if not applicable */
+  readonly revisionInstructions: string | null;
+  /** One-line review summary from Claude, or null if not provided */
+  readonly summary: string | null;
 }
 
 export class ReviewEngine {
@@ -180,17 +234,24 @@ export class ReviewEngine {
 
   /**
    * Evaluate a completed task's output with both structural validation
-   * AND Claude Opus semantic review. Falls back to structural-only if
+   * AND Claude semantic review. Falls back to structural-only if
    * no ClaudeClient was provided.
    *
-   * Returns both the decision and the cost of the semantic review (EC-4).
+   * Accepts an optional SemanticReviewConfig to control review depth:
+   * - "quick": Structural only (no API call)
+   * - "standard": Structural + Sonnet review (cost-effective)
+   * - "deep": Structural + Opus review with SKILL.md context (most thorough)
+   *
+   * Returns the decision, cost, and actual review depth used.
    */
   async evaluateTaskSemantic(
     task: Task,
     outputContent: string,
     existingReviews: readonly Review[],
     budgetState?: BudgetState,
+    reviewConfig?: SemanticReviewConfig,
   ): Promise<SemanticReviewResult> {
+    const config = reviewConfig ?? DEFAULT_SEMANTIC_REVIEW_CONFIG;
     const reviewIndex = existingReviews.length;
     const structuralFindings: ReviewFinding[] = [];
     const revisionRequests: RevisionRequest[] = [];
@@ -225,12 +286,11 @@ export class ReviewEngine {
       structuralFindings.push(...additionalFindings);
     }
 
-    // 2. Short-circuit on critical structural findings — skip Opus call
+    // 2. Short-circuit: quick depth, critical findings, or no client
     const hasCriticalStructural = structuralFindings.some(
       (f) => f.severity === "critical",
     );
-    if (hasCriticalStructural || !this.client) {
-      // No client or critical structural issue → structural-only result
+    if (config.depth === "quick" || hasCriticalStructural || !this.client) {
       const decision = this.buildDecisionFromFindings(
         task,
         structuralFindings,
@@ -238,30 +298,63 @@ export class ReviewEngine {
         existingReviews,
         reviewIndex,
       );
-      return { decision, reviewCost: 0 };
+      return { decision, reviewCost: 0, reviewDepth: "quick" };
     }
 
-    // 3. Perform semantic review — uses opus by default, respects budget modelOverride
-    const reviewModelTier: ModelTier = budgetState?.modelOverride ?? "opus";
-    const { findings: semanticFindings, cost: reviewCost } =
-      await this.performSemanticReview(task, outputContent, reviewModelTier);
+    // 3. Determine model tier based on depth + budget
+    let reviewModelTier: ModelTier;
+    if (budgetState?.modelOverride) {
+      reviewModelTier = budgetState.modelOverride;
+    } else if (config.depth === "standard") {
+      reviewModelTier = "sonnet";
+    } else {
+      reviewModelTier = "opus";
+    }
 
-    // 4. Merge structural + semantic findings, deduplicate
-    const allFindings = this.mergeFindings(
-      structuralFindings,
-      semanticFindings,
+    // 4. Load SKILL.md content for deep reviews
+    let skillContent: string | null = null;
+    if (config.depth === "deep" && config.projectRoot) {
+      skillContent = await this.loadSkillContent(task.to, config.projectRoot);
+    }
+
+    // 5. Perform semantic review with skill context
+    const semanticResult = await this.performSemanticReview(
+      task,
+      outputContent,
+      reviewModelTier,
+      skillContent,
+      config.maxResponseTokens,
     );
 
-    // 5. Build decision from merged findings
-    const decision = this.buildDecisionFromFindings(
+    // 6. Merge structural + semantic findings, deduplicate
+    const allFindings = this.mergeFindings(
+      structuralFindings,
+      semanticResult.findings,
+    );
+
+    // 7. Build decision — use Claude's verdict if available, else derive from findings
+    const decision = this.buildDecisionFromSemanticResult(
       task,
       allFindings,
-      revisionRequests,
+      semanticResult,
       existingReviews,
       reviewIndex,
     );
 
-    return { decision, reviewCost };
+    // 8. Quality scoring (automatic when QualityScorer is wired in)
+    let qualityScore: QualityScore | undefined;
+    if (this.qualityScorer) {
+      const criteria = getSkillCriteria(task.to);
+      // Use structural scoring (free) — semantic review already happened above
+      qualityScore = this.qualityScorer.scoreStructural(task, outputContent, criteria);
+    }
+
+    return {
+      decision,
+      reviewCost: semanticResult.cost,
+      reviewDepth: config.depth,
+      qualityScore,
+    };
   }
 
   /**
@@ -423,35 +516,72 @@ export class ReviewEngine {
   }
 
   /**
-   * Perform semantic review via Claude Opus.
-   * Returns findings and the cost of the API call.
+   * Perform semantic review via Claude.
+   *
+   * Enhanced prompt asks Claude for a structured JSON response containing:
+   * - verdict: APPROVE / REVISE / REJECT
+   * - findings: array of issues found
+   * - revisionInstructions: specific feedback for the agent to improve (if REVISE)
+   * - summary: one-line summary of the review
+   *
+   * When skillContent is provided (deep mode), the review is contextualized
+   * against the skill's quality criteria from its SKILL.md file.
+   *
    * Degrades gracefully on parse errors — returns empty findings.
    */
   private async performSemanticReview(
     task: Task,
     outputContent: string,
     modelTier: ModelTier = "opus",
-  ): Promise<{ findings: ReviewFinding[]; cost: number }> {
-    const systemPrompt = `You are the Marketing Director reviewing agent output for quality.
+    skillContent?: string | null,
+    maxResponseTokens?: number,
+  ): Promise<SemanticReviewResponse> {
+    const skillContext = skillContent
+      ? `\n\nThe agent's SKILL.md (quality criteria and output expectations):\n<skill-definition>\n${skillContent}\n</skill-definition>`
+      : "";
+
+    const revisionContext = task.revisionCount > 0
+      ? `\n\nThis is revision #${task.revisionCount}. The original requirements include revision feedback from a prior review. Pay special attention to whether the revision feedback has been addressed.`
+      : "";
+
+    const systemPrompt = `You are the Marketing Director reviewing an agent's output for quality.
+You are an expert evaluator of marketing content, strategy, and copy.${skillContext}
 
 Evaluate the output against these criteria:
-1. **Completeness**: Does the output address all requirements in the task?
-2. **Quality**: Is the output specific, actionable, and well-structured?
-3. **Brand alignment**: Does it match professional marketing standards?
-4. **Data-driven**: Are recommendations backed by evidence or principles?
-5. **Actionability**: Can the next agent or human actually use this output?
+1. **Completeness**: Does the output address ALL requirements in the task? Are any sections missing?
+2. **Quality**: Is the output specific, actionable, and well-structured? Does it go beyond generic advice?
+3. **Brand alignment**: Does it match professional marketing standards? Is the tone appropriate?
+4. **Data-driven**: Are recommendations backed by evidence, principles, or specific metrics?
+5. **Actionability**: Can the next agent or human actually implement these recommendations?
+6. **Specificity**: Does it reference the actual product/context rather than using generic placeholders?${revisionContext}
 
-Respond with ONLY a JSON array of findings. Each finding must have:
-- "section": the part of the output with the issue
-- "severity": one of "critical", "major", "minor", "suggestion"
-- "description": a specific, actionable description of the issue
+Respond with ONLY a JSON object (no markdown code blocks, no prose before/after):
 
-If the output is good and has no issues, respond with an empty array: []
+{
+  "verdict": "APPROVE" | "REVISE" | "REJECT",
+  "findings": [
+    {
+      "section": "the part of the output with the issue",
+      "severity": "critical" | "major" | "minor" | "suggestion",
+      "description": "specific, actionable description of the issue"
+    }
+  ],
+  "revisionInstructions": "If verdict is REVISE: specific, prioritized instructions for the agent to improve the output. Be concrete — reference specific sections, suggest exact changes, and explain why. If APPROVE: leave empty string.",
+  "summary": "One-line summary of the review decision."
+}
 
-Example response:
-[{"section":"recommendations","severity":"minor","description":"Recommendations lack specific metrics or KPIs to measure success"}]`;
+Severity guide:
+- critical: Output is fundamentally wrong, off-topic, or harmful. Must be rejected.
+- major: Significant gap that makes the output insufficient for its purpose. Must be revised.
+- minor: Small issue that could improve quality but doesn't block approval.
+- suggestion: Optional improvement that would make good output better.
 
-    const userMessage = `Task: ${task.to}
+Verdict rules:
+- APPROVE: No critical or major findings. Output is ready to use.
+- REVISE: Has major findings but is salvageable. Agent should fix and resubmit.
+- REJECT: Has critical findings or is fundamentally unsuitable.`;
+
+    const userMessage = `Task skill: ${task.to}
 Goal: ${task.goal}
 Requirements: ${task.requirements}
 
@@ -463,7 +593,7 @@ ${outputContent}`;
         model: MODEL_MAP[modelTier],
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
-        maxTokens: 4096,
+        maxTokens: maxResponseTokens ?? 4096,
         timeoutMs: 60_000,
       });
 
@@ -473,54 +603,227 @@ ${outputContent}`;
         result.outputTokens,
       );
 
-      // Parse JSON response
-      const findings = this.parseSemanticFindings(result.content);
-      return { findings, cost };
+      // Parse structured JSON response
+      return this.parseSemanticResponse(result.content, cost);
     } catch {
-      // Graceful degradation — log would go here in production
-      return { findings: [], cost: 0 };
+      // Graceful degradation
+      return { findings: [], cost: 0, verdict: null, revisionInstructions: null, summary: null };
     }
   }
 
   /**
-   * Parse the Opus response as a JSON array of ReviewFinding[].
-   * Validates severity values and discards invalid findings.
+   * Load a skill's SKILL.md content for context-aware review.
+   * Returns null if the file cannot be read (non-fatal).
    */
-  private parseSemanticFindings(content: string): ReviewFinding[] {
+  private async loadSkillContent(
+    skillName: SkillName,
+    projectRoot: string,
+  ): Promise<string | null> {
     try {
-      // Extract JSON from response (Opus might wrap it in markdown code blocks)
-      let jsonStr = content.trim();
-      const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (codeBlockMatch) {
-        jsonStr = codeBlockMatch[1]!.trim();
-      }
-
-      const parsed = JSON.parse(jsonStr);
-      if (!Array.isArray(parsed)) return [];
-
-      const findings: ReviewFinding[] = [];
-      for (const item of parsed) {
-        if (
-          typeof item === "object" &&
-          item !== null &&
-          typeof item.section === "string" &&
-          typeof item.severity === "string" &&
-          typeof item.description === "string" &&
-          VALID_SEVERITIES.has(item.severity)
-        ) {
-          findings.push({
-            section: item.section,
-            severity: item.severity as FindingSeverity,
-            description: item.description,
-          });
-        }
-        // Discard findings with unknown severity
-      }
-      return findings;
+      const skillPath = resolve(projectRoot, ".agents", "skills", skillName, "SKILL.md");
+      return await readFile(skillPath, "utf-8");
     } catch {
-      // Graceful degradation — Opus returned prose instead of JSON
-      return [];
+      return null;
     }
+  }
+
+  /**
+   * Parse the Claude response as a structured JSON review result.
+   *
+   * Supports two response formats for backward compatibility:
+   * 1. New structured format: { verdict, findings, revisionInstructions, summary }
+   * 2. Legacy array format: [ { section, severity, description } ]
+   *
+   * Validates severity and verdict values, discards invalid entries.
+   */
+  private parseSemanticResponse(content: string, cost: number): SemanticReviewResponse {
+    try {
+      const jsonStr = this.extractJson(content);
+      const parsed = JSON.parse(jsonStr);
+
+      // Handle legacy array format (backward compatibility)
+      if (Array.isArray(parsed)) {
+        const findings = this.validateFindings(parsed);
+        return { findings, cost, verdict: null, revisionInstructions: null, summary: null };
+      }
+
+      // Handle new structured format
+      if (typeof parsed === "object" && parsed !== null) {
+        const findings = Array.isArray(parsed.findings)
+          ? this.validateFindings(parsed.findings)
+          : [];
+
+        const verdict: ReviewVerdict | null =
+          typeof parsed.verdict === "string" && VALID_VERDICTS.has(parsed.verdict)
+            ? (parsed.verdict as ReviewVerdict)
+            : null;
+
+        const revisionInstructions =
+          typeof parsed.revisionInstructions === "string" && parsed.revisionInstructions.trim().length > 0
+            ? parsed.revisionInstructions.trim()
+            : null;
+
+        const summary =
+          typeof parsed.summary === "string" && parsed.summary.trim().length > 0
+            ? parsed.summary.trim()
+            : null;
+
+        return { findings, cost, verdict, revisionInstructions, summary };
+      }
+
+      return { findings: [], cost, verdict: null, revisionInstructions: null, summary: null };
+    } catch {
+      // Graceful degradation — Claude returned prose instead of JSON
+      return { findings: [], cost, verdict: null, revisionInstructions: null, summary: null };
+    }
+  }
+
+  /**
+   * Extract JSON string from Claude's response, handling markdown code blocks.
+   */
+  private extractJson(content: string): string {
+    let jsonStr = content.trim();
+    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      jsonStr = codeBlockMatch[1]!.trim();
+    }
+    return jsonStr;
+  }
+
+  /**
+   * Validate and filter an array of raw finding objects.
+   * Discards entries with missing fields or unknown severity values.
+   */
+  private validateFindings(items: unknown[]): ReviewFinding[] {
+    const findings: ReviewFinding[] = [];
+    for (const item of items) {
+      if (
+        typeof item === "object" &&
+        item !== null &&
+        typeof (item as Record<string, unknown>).section === "string" &&
+        typeof (item as Record<string, unknown>).severity === "string" &&
+        typeof (item as Record<string, unknown>).description === "string" &&
+        VALID_SEVERITIES.has((item as Record<string, unknown>).severity as string)
+      ) {
+        findings.push({
+          section: (item as Record<string, unknown>).section as string,
+          severity: (item as Record<string, unknown>).severity as FindingSeverity,
+          description: (item as Record<string, unknown>).description as string,
+        });
+      }
+    }
+    return findings;
+  }
+
+  /**
+   * Build a DirectorDecision using semantic review results.
+   *
+   * If Claude provided a verdict, uses it directly (semantic intelligence).
+   * Otherwise falls back to deriving verdict from finding severities.
+   *
+   * When revisionInstructions are available, they are included in the
+   * revision requests for richer feedback to the agent.
+   */
+  private buildDecisionFromSemanticResult(
+    task: Task,
+    allFindings: ReviewFinding[],
+    semanticResult: SemanticReviewResponse,
+    existingReviews: readonly Review[],
+    reviewIndex: number,
+  ): DirectorDecision {
+    const revisionRequests: RevisionRequest[] = [];
+
+    // Determine verdict: prefer Claude's verdict, fall back to finding-based
+    let verdict: ReviewVerdict;
+    if (semanticResult.verdict) {
+      verdict = semanticResult.verdict;
+    } else {
+      const hasCritical = allFindings.some((f) => f.severity === "critical");
+      const hasMajor = allFindings.some((f) => f.severity === "major");
+      if (hasCritical) verdict = "REJECT";
+      else if (hasMajor) verdict = "REVISE";
+      else verdict = "APPROVE";
+    }
+
+    // Build revision requests from findings + semantic instructions
+    if (verdict === "REVISE") {
+      // Add semantic revision instructions as the primary request (if available)
+      if (semanticResult.revisionInstructions) {
+        revisionRequests.push({
+          description: semanticResult.revisionInstructions,
+          priority: "required",
+        });
+      }
+      // Add major findings as additional requests
+      for (const f of allFindings.filter((f) => f.severity === "major")) {
+        revisionRequests.push({
+          description: f.description,
+          priority: "required",
+        });
+      }
+    }
+
+    const action = this.determineAction(verdict, task, existingReviews);
+
+    const summary = semanticResult.summary
+      ?? (verdict === "APPROVE"
+        ? "Output meets structural and semantic requirements."
+        : `Output has ${allFindings.length} finding(s) requiring attention.`);
+
+    const review = this.buildReview(
+      task.id,
+      task.to,
+      verdict,
+      allFindings,
+      revisionRequests,
+      summary,
+      reviewIndex,
+    );
+
+    const nextTasks: Task[] = [];
+    if (action === "revise") {
+      nextTasks.push(this.createRevisionTask(
+        task,
+        revisionRequests,
+        semanticResult.summary,
+        allFindings,
+      ));
+    }
+
+    let escalation: Escalation | null = null;
+    if (action === "escalate_human") {
+      escalation = {
+        reason: "agent_loop_detected",
+        severity: "warning",
+        message: `Task ${task.id} has been revised ${task.revisionCount} times (max: ${this.config.maxRevisionsPerTask}). Requires human decision.`,
+        context: {
+          taskId: task.id,
+          skill: task.to,
+          revisionCount: task.revisionCount,
+        },
+      };
+    }
+
+    let learning: LearningEntry | null = null;
+    if (action === "goal_complete" || action === "approve") {
+      learning = this.buildLearning(
+        task.goalId ?? "unknown",
+        "director",
+        "success",
+        `Task ${task.id} completed by ${task.to}. Output approved.`,
+        summary,
+      );
+    }
+
+    return {
+      taskId: task.id,
+      action,
+      review,
+      nextTasks,
+      learning,
+      escalation,
+      reasoning: this.buildReasoning(verdict, action, allFindings),
+    };
   }
 
   /**
@@ -681,10 +984,19 @@ ${outputContent}`;
 
   /**
    * Create a revision task from the original task and revision requests.
+   *
+   * Stores structured revision feedback in task.metadata so the prompt
+   * builder can render it in a dedicated <revision-feedback> section,
+   * separate from the original requirements.
+   *
+   * The requirements field still contains a human-readable summary for
+   * backward compatibility, but the prompt builder prefers metadata.
    */
   private createRevisionTask(
     original: Task,
     revisionRequests: readonly RevisionRequest[],
+    reviewSummary?: string | null,
+    reviewFindings?: readonly ReviewFinding[],
   ): Task {
     const now = new Date().toISOString();
     const taskId = generateTaskId(original.to);
@@ -692,6 +1004,11 @@ ${outputContent}`;
     const revisionDetails = revisionRequests
       .map((r) => `- [${r.priority}] ${r.description}`)
       .join("\n");
+
+    // Extract the original requirements (strip any prior "REVISION REQUESTED" prefix)
+    const originalRequirements = original.metadata.originalRequirements
+      ? String(original.metadata.originalRequirements)
+      : original.requirements.replace(/^REVISION REQUESTED:[\s\S]*?\n\nOriginal requirements:\s*/m, "");
 
     return {
       id: taskId,
@@ -713,7 +1030,7 @@ ${outputContent}`;
           description: "Previous output to revise",
         },
       ],
-      requirements: `REVISION REQUESTED:\n${revisionDetails}\n\nOriginal requirements: ${original.requirements}`,
+      requirements: `REVISION REQUESTED:\n${revisionDetails}\n\nOriginal requirements: ${originalRequirements}`,
       output: original.output,
       next: original.next,
       tags: [...original.tags, "revision"],
@@ -721,6 +1038,19 @@ ${outputContent}`;
         ...original.metadata,
         originalTaskId: original.id,
         revisionOf: original.id,
+        originalRequirements: originalRequirements,
+        revisionFeedback: revisionRequests.map((r) => ({
+          description: r.description,
+          priority: r.priority,
+        })),
+        reviewSummary: reviewSummary ?? null,
+        reviewFindings: reviewFindings
+          ? reviewFindings.map((f) => ({
+              section: f.section,
+              severity: f.severity,
+              description: f.description,
+            }))
+          : null,
       },
     };
   }
