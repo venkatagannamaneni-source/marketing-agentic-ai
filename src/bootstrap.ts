@@ -36,6 +36,7 @@ import { EventBus } from "./events/event-bus.ts";
 import { DEFAULT_EVENT_MAPPINGS } from "./events/default-mappings.ts";
 import { Scheduler } from "./scheduler/scheduler.ts";
 import { DEFAULT_SCHEDULES } from "./scheduler/default-schedules.ts";
+import { DomainRegistry, DomainRegistryError } from "./domain/domain-registry.ts";
 
 // ── Application Interface ──────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ export interface Application {
   readonly config: RuntimeConfig;
   readonly registry: SkillRegistry;
   readonly toolRegistry: ToolRegistry;
+  readonly domainRegistry?: DomainRegistry;
   readonly workspace: FileSystemWorkspaceManager;
   readonly client: AnthropicClaudeClient;
   readonly director: MarketingDirector;
@@ -93,6 +95,29 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     squads: registry.squadNames.length,
     foundation: registry.foundationSkill,
   });
+
+  // 2a2. Domain Registry — load from .agents/domain.yaml (optional)
+  //      Provides domain-specific config: goal categories, director prompt,
+  //      quality dimensions, phase blueprints. When absent, marketing defaults apply.
+  const domainPath = resolve(config.projectRoot, ".agents/domain.yaml");
+  let domainRegistry: DomainRegistry | undefined;
+  try {
+    domainRegistry = await DomainRegistry.fromYaml(domainPath);
+    logger.info("Domain registry loaded", {
+      domain: domainRegistry.domainName,
+      categories: domainRegistry.categoryNames.length,
+      qualityDimensions: domainRegistry.quality.dimensions.length,
+    });
+  } catch (err: unknown) {
+    if (
+      err instanceof DomainRegistryError &&
+      err.errors.some((e) => e.includes("not found"))
+    ) {
+      logger.info("No domain.yaml found, using hardcoded marketing defaults");
+    } else {
+      throw err;
+    }
+  }
 
   // 2b. Tool Registry — load from .agents/tools.yaml (optional)
   const toolsPath = resolve(config.projectRoot, ".agents/tools.yaml");
@@ -245,6 +270,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     registry,
     qualityScorer,
     routingRegistry,
+    domainRegistry,
   );
 
   // 10. Pipeline Engine — prefer YAML templates if available
@@ -289,7 +315,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     password: config.redis.password,
     maxRetriesPerRequest: 3,
   };
-  const queueName = "marketing-tasks";
+  const queueName = domainRegistry?.queueName ?? "marketing-tasks";
 
   const queueAdapter = new BullMQQueueAdapter(queueName, redisConnectionOpts);
   const workerAdapter = new BullMQWorkerAdapter(
@@ -341,6 +367,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     config,
     registry,
     toolRegistry,
+    domainRegistry,
     workspace,
     client,
     director,

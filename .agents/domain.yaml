@@ -1,0 +1,248 @@
+# Domain Configuration
+# This file defines the domain-specific "personality" of the agent system.
+# Swap this file (along with skills.yaml, routing.yaml, pipelines.yaml,
+# schedules.yaml, events.yaml) to repurpose the system for any domain.
+#
+# Examples:
+#   Marketing → DevOps → Customer Support → Sales → HR
+#   Just change this file + the other .agents/*.yaml configs + skill SKILL.md files.
+
+domain:
+  name: "Marketing"
+  description: "Self-operating marketing team — AI agents that strategize, create, optimize, measure, and iterate across the full marketing funnel."
+  queue_name: "marketing-tasks"
+
+# ── Goal Categories ──────────────────────────────────────────────────────────
+# Each category has:
+#   - patterns: regex patterns to infer the category from natural language goals
+#   - template: pipeline template name to use (null = build phases from routing)
+#   - phases: phase blueprints for goal decomposition when no template matches
+#
+# Pattern matching order: categories are tested top-to-bottom, first match wins.
+# Put specific categories before generic ones.
+
+categories:
+  - name: competitive
+    patterns:
+      - "\\b(competitor|alternative|vs\\b|competitive)\\b"
+    template: "Competitive Response"
+    phases:
+      - name: RESEARCH
+        description: "Analyze competitive landscape"
+      - name: RESPOND
+        description: "Create competitive response content"
+      - name: ADJUST
+        description: "Update pricing if needed"
+      - name: MEASURE
+        description: "Track response effectiveness"
+
+  - name: measurement
+    patterns:
+      - "\\b(analytics|track|measur|seo.?audit|a/?b.?test)\\b"
+    template: "SEO Cycle"
+    phases:
+      - name: MEASURE
+        description: "Run audits and set up tracking"
+
+  - name: retention
+    patterns:
+      - "\\b(churn|retain|onboard|activation|email.?sequence|referral)\\b"
+    template: "Retention Sprint"
+    phases:
+      - name: ACTIVATE
+        description: "Improve activation and retention flows"
+      - name: MEASURE
+        description: "Test and measure retention changes"
+
+  - name: content
+    patterns:
+      - "\\b(content|blog|article|copy|write)\\b"
+    template: "Content Production"
+    phases:
+      - name: PLAN
+        description: "Define content strategy"
+      - name: CREATE
+        description: "Produce content assets"
+      - name: MEASURE
+        description: "Audit and track content performance"
+
+  - name: optimization
+    patterns:
+      - "\\b(conver[ts]?|signup|cro|optimiz|landing|page)\\b"
+    template: "Conversion Sprint"
+    phases:
+      - name: AUDIT
+        description: "Assess current conversion performance"
+      - name: CREATE
+        description: "Execute improvements based on audit"
+      - name: TEST
+        description: "Set up experiments and tracking"
+
+  - name: strategic
+    default: true
+    patterns: []
+    template: null
+    phases:
+      - name: PLAN
+        description: "Develop strategy and positioning"
+      - name: MEASURE
+        description: "Track and validate strategic outcomes"
+
+# ── Director Prompt ──────────────────────────────────────────────────────────
+# Template sections for the Director's system prompt.
+# The team roster is auto-generated from skills.yaml — these sections
+# define the domain-specific reasoning and standards.
+
+director:
+  role: |
+    You decompose high-level marketing goals into specific tasks, assign them to the right agents, review their outputs, and decide whether to approve, revise, or escalate. You are the single point of accountability for all marketing execution.
+
+  decision_rules: |
+    1. IF goal is strategic (positioning, pricing, launch planning) → Route to Strategy Squad
+    2. IF goal is content creation (new pages, emails, ads, social) → Route to Creative Squad, with Strategy Squad output as input
+    3. IF goal is optimization (improve existing pages, forms, flows) → Route to Convert Squad for audit, then Creative Squad for execution, then Measure Squad for testing
+    4. IF goal is retention (churn, activation, upgrades) → Route to Activate Squad
+    5. IF goal is competitive response → Route to Strategy Squad (research) then Creative Squad (response)
+    6. ALWAYS: Measure Squad is the final step. Feed results back to memory/learnings.md.
+    7. ALWAYS: If target not met after measurement, re-enter the loop with updated data.
+
+  review_standards: |
+    When reviewing agent output, evaluate:
+    1. **Completeness**: Does the output address all requirements in the task?
+    2. **Quality**: Is the output specific, actionable, and well-structured?
+    3. **Brand alignment**: Does it match the voice and positioning in product-marketing-context.md?
+    4. **Data-driven**: Are recommendations backed by evidence or principles from the agent's reference materials?
+    5. **Actionability**: Can the next agent or human actually use this output?
+
+    Verdicts:
+    - APPROVE: Output meets all requirements. Proceed to next step.
+    - REVISE: Output has fixable issues. Send back with specific revision requests.
+    - REJECT: Output is fundamentally off-track. Reassign or re-scope the task.
+
+  escalation_criteria: |
+    Escalate to a human when:
+    - Budget decisions (spending exceeds planned threshold)
+    - Brand voice or positioning changes
+    - Legal or compliance concerns
+    - Pricing changes that affect revenue
+    - An agent has been revised 3+ times without approval
+    - Cascading pipeline failures (3+ consecutive agent failures)
+
+  output_format: |
+    When creating task assignments, use this structure:
+    - Clear goal statement
+    - Specific requirements (not vague instructions)
+    - Input files the agent should read
+    - Expected output format and location
+    - What happens after the task (next agent or return to Director)
+
+  memory: |
+    Before planning any new work:
+    1. Read context/product-marketing-context.md for current positioning
+    2. Read memory/learnings.md for past results and what worked
+    3. Read metrics/ for current performance data
+
+    After completing any goal:
+    1. Write results and learnings to memory/learnings.md
+    2. Note what worked, what failed, and what to try differently next time
+
+# ── Quality ──────────────────────────────────────────────────────────────────
+# Quality dimensions and per-squad dimension profiles.
+
+quality:
+  dimensions:
+    - completeness
+    - clarity
+    - actionability
+    - brand_alignment
+    - data_driven
+    - technical_accuracy
+    - creativity
+
+  thresholds:
+    approve_above: 7.0
+    revise_below: 7.0
+    reject_below: 4.0
+
+  # Dimension weight profiles by squad type
+  profiles:
+    strategy:
+      - { dimension: completeness, weight: 0.25, min_score: 5 }
+      - { dimension: actionability, weight: 0.20, min_score: 5 }
+      - { dimension: data_driven, weight: 0.20, min_score: 4 }
+      - { dimension: clarity, weight: 0.15, min_score: 5 }
+      - { dimension: brand_alignment, weight: 0.10, min_score: 4 }
+      - { dimension: creativity, weight: 0.05, min_score: 3 }
+      - { dimension: technical_accuracy, weight: 0.05, min_score: 4 }
+
+    creative:
+      - { dimension: clarity, weight: 0.25, min_score: 5 }
+      - { dimension: creativity, weight: 0.20, min_score: 5 }
+      - { dimension: brand_alignment, weight: 0.20, min_score: 5 }
+      - { dimension: actionability, weight: 0.15, min_score: 4 }
+      - { dimension: completeness, weight: 0.10, min_score: 4 }
+      - { dimension: data_driven, weight: 0.05, min_score: 3 }
+      - { dimension: technical_accuracy, weight: 0.05, min_score: 3 }
+
+    convert:
+      - { dimension: actionability, weight: 0.25, min_score: 5 }
+      - { dimension: data_driven, weight: 0.20, min_score: 5 }
+      - { dimension: completeness, weight: 0.20, min_score: 5 }
+      - { dimension: clarity, weight: 0.15, min_score: 5 }
+      - { dimension: technical_accuracy, weight: 0.10, min_score: 4 }
+      - { dimension: brand_alignment, weight: 0.05, min_score: 3 }
+      - { dimension: creativity, weight: 0.05, min_score: 3 }
+
+    activate:
+      - { dimension: actionability, weight: 0.25, min_score: 5 }
+      - { dimension: completeness, weight: 0.20, min_score: 5 }
+      - { dimension: clarity, weight: 0.20, min_score: 5 }
+      - { dimension: brand_alignment, weight: 0.15, min_score: 4 }
+      - { dimension: data_driven, weight: 0.10, min_score: 3 }
+      - { dimension: creativity, weight: 0.05, min_score: 3 }
+      - { dimension: technical_accuracy, weight: 0.05, min_score: 3 }
+
+    measure:
+      - { dimension: technical_accuracy, weight: 0.25, min_score: 6 }
+      - { dimension: data_driven, weight: 0.25, min_score: 5 }
+      - { dimension: completeness, weight: 0.20, min_score: 5 }
+      - { dimension: actionability, weight: 0.15, min_score: 4 }
+      - { dimension: clarity, weight: 0.15, min_score: 5 }
+      - { dimension: brand_alignment, weight: 0.00, min_score: 0 }
+      - { dimension: creativity, weight: 0.00, min_score: 0 }
+
+  # Per-skill quality criteria overrides
+  # Maps skill name → profile + required sections + min word count
+  skill_criteria:
+    # Foundation
+    product-marketing-context: { profile: strategy, required_sections: ["Product", "Audience", "Positioning"], min_word_count: 200 }
+    # Strategy Squad
+    content-strategy: { profile: strategy, required_sections: ["Summary", "Strategy", "Recommendations"], min_word_count: 300 }
+    pricing-strategy: { profile: strategy, required_sections: ["Analysis", "Recommendations"], min_word_count: 300 }
+    launch-strategy: { profile: strategy, required_sections: ["Timeline", "Channels", "Strategy"], min_word_count: 300 }
+    marketing-ideas: { profile: strategy, required_sections: ["Ideas"], min_word_count: 200 }
+    marketing-psychology: { profile: strategy, required_sections: ["Principles", "Application"], min_word_count: 200 }
+    competitor-alternatives: { profile: strategy, required_sections: ["Competitors", "Comparison"], min_word_count: 300 }
+    # Creative Squad
+    copywriting: { profile: creative, required_sections: [], min_word_count: 100 }
+    copy-editing: { profile: creative, required_sections: ["Feedback", "Suggestions"], min_word_count: 100 }
+    social-content: { profile: creative, required_sections: [], min_word_count: 50 }
+    cold-email: { profile: creative, required_sections: ["Subject", "Body"], min_word_count: 50 }
+    paid-ads: { profile: creative, required_sections: ["Ad Copy"], min_word_count: 50 }
+    programmatic-seo: { profile: creative, required_sections: ["Template", "Strategy"], min_word_count: 200 }
+    schema-markup: { profile: creative, required_sections: ["Schema"], min_word_count: 50 }
+    # Convert Squad
+    page-cro: { profile: convert, required_sections: ["Findings", "Recommendations"], min_word_count: 200 }
+    form-cro: { profile: convert, required_sections: ["Analysis", "Recommendations"], min_word_count: 200 }
+    signup-flow-cro: { profile: convert, required_sections: ["Analysis", "Recommendations"], min_word_count: 200 }
+    popup-cro: { profile: convert, required_sections: ["Analysis", "Recommendations"], min_word_count: 100 }
+    free-tool-strategy: { profile: convert, required_sections: ["Strategy", "Implementation"], min_word_count: 200 }
+    # Activate Squad
+    onboarding-cro: { profile: activate, required_sections: ["Flow", "Recommendations"], min_word_count: 200 }
+    email-sequence: { profile: activate, required_sections: ["Sequence"], min_word_count: 200 }
+    paywall-upgrade-cro: { profile: activate, required_sections: ["Analysis", "Recommendations"], min_word_count: 200 }
+    referral-program: { profile: activate, required_sections: ["Program", "Incentives"], min_word_count: 200 }
+    # Measure Squad
+    analytics-tracking: { profile: measure, required_sections: ["Tracking Plan"], min_word_count: 200 }
+    ab-test-setup: { profile: measure, required_sections: ["Hypothesis", "Setup"], min_word_count: 200 }
+    seo-audit: { profile: measure, required_sections: ["Findings", "Recommendations"], min_word_count: 300 }

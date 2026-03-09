@@ -202,7 +202,23 @@ export class ScheduleRegistry {
       }
     }
 
-    const validCategories = GOAL_CATEGORIES as readonly string[];
+    // Goal category validation is deferred — categories may be dynamically
+    // defined in domain.yaml rather than the hardcoded GOAL_CATEGORIES list.
+    // Use validateAgainstCategories() for cross-validation with domain config.
+
+    if (errors.length > 0) {
+      throw new ScheduleRegistryError(
+        `Schedule registry validation failed with ${errors.length} error(s):\n${errors.map((e) => `  - ${e}`).join("\n")}`,
+        errors,
+      );
+    }
+  }
+
+  /**
+   * Validate goal categories against a known list (from DomainRegistry or defaults).
+   */
+  validateAgainstCategories(validCategories: readonly string[]): void {
+    const errors: string[] = [];
     for (const s of this._schedules) {
       if (s.goalCategory && !validCategories.includes(s.goalCategory)) {
         errors.push(
@@ -210,10 +226,9 @@ export class ScheduleRegistry {
         );
       }
     }
-
     if (errors.length > 0) {
       throw new ScheduleRegistryError(
-        `Schedule registry validation failed with ${errors.length} error(s):\n${errors.map((e) => `  - ${e}`).join("\n")}`,
+        `Schedule registry cross-validation failed with ${errors.length} error(s):\n${errors.map((e) => `  - ${e}`).join("\n")}`,
         errors,
       );
     }

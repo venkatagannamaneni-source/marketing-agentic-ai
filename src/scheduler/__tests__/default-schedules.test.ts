@@ -44,7 +44,7 @@ describe("DEFAULT_SCHEDULES", () => {
   });
 
   it("all schedules with goalCategory have valid categories", () => {
-    const validCategories = new Set(GOAL_CATEGORIES);
+    const validCategories = new Set<string>(GOAL_CATEGORIES);
     for (const schedule of DEFAULT_SCHEDULES) {
       if (schedule.goalCategory) {
         expect(validCategories.has(schedule.goalCategory)).toBe(true);

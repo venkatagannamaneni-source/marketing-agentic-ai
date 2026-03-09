@@ -1,4 +1,6 @@
 // ── Quality Dimensions ───────────────────────────────────────────────────────
+// Default dimensions are kept for backward compatibility.
+// At runtime, the DomainRegistry may provide different dimensions.
 
 export const QUALITY_DIMENSIONS = [
   "completeness",
@@ -10,7 +12,11 @@ export const QUALITY_DIMENSIONS = [
   "creativity",
 ] as const;
 
-export type QualityDimension = (typeof QUALITY_DIMENSIONS)[number];
+/**
+ * Quality dimension type. Accepts the built-in defaults and any
+ * custom dimension string loaded from domain.yaml at runtime.
+ */
+export type QualityDimension = (typeof QUALITY_DIMENSIONS)[number] | (string & {});
 
 // ── Quality Score ────────────────────────────────────────────────────────────
 

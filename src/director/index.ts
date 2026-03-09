@@ -24,7 +24,7 @@ export {
 } from "./types.ts";
 
 // ── System Prompt ────────────────────────────────────────────────────────────
-export { DIRECTOR_SYSTEM_PROMPT, buildDirectorPrompt } from "./system-prompt.ts";
+export { DIRECTOR_SYSTEM_PROMPT, buildDirectorPrompt, type DirectorPromptOptions } from "./system-prompt.ts";
 
 // ── Squad Router ─────────────────────────────────────────────────────────────
 export { routeGoal, routeGoalFromRegistry, selectSkills, ROUTING_RULES } from "./squad-router.ts";
@@ -67,6 +67,7 @@ export {
   DEFAULT_SKILL_CRITERIA,
   getSkillCriteria,
   resolveThreshold,
+  buildSkillCriteriaFromDomain,
 } from "./quality-criteria.ts";
 
 // ── Learning Validator ──────────────────────────────────────────────────────

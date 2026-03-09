@@ -30,6 +30,7 @@ import type { QualityScorer } from "./quality-scorer.ts";
 import { EscalationEngine } from "./escalation.ts";
 import { routeGoal, routeGoalFromRegistry } from "./squad-router.ts";
 import type { RoutingRegistry } from "./routing-registry.ts";
+import type { DomainRegistry } from "../domain/domain-registry.ts";
 import { parseLearnings } from "../workspace/markdown.ts";
 import type { ClaudeClient } from "../agents/claude-client.ts";
 import { AgentExecutor } from "../agents/executor.ts";
@@ -75,6 +76,7 @@ export class MarketingDirector {
     registry?: SkillRegistry,
     qualityScorer?: QualityScorer,
     routingRegistry?: RoutingRegistry,
+    domainRegistry?: DomainRegistry,
   ) {
     this.config = { ...DEFAULT_DIRECTOR_CONFIG, ...config };
     this.logger = (logger ?? NULL_LOGGER).child({ module: "director" });
@@ -87,9 +89,9 @@ export class MarketingDirector {
     this.skillSquadMap = registry?.skillSquadMap ?? SKILL_SQUAD_MAP;
     this.foundationSkill = registry?.foundationSkill ?? FOUNDATION_SKILL;
     this.directorPrompt = registry
-      ? buildDirectorPrompt(registry)
+      ? buildDirectorPrompt(registry, { domainRegistry })
       : DIRECTOR_SYSTEM_PROMPT;
-    this.goalDecomposer = new GoalDecomposer(PIPELINE_TEMPLATES, registry);
+    this.goalDecomposer = new GoalDecomposer(PIPELINE_TEMPLATES, registry, domainRegistry);
     this.pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES, registry);
     this.reviewEngine = new ReviewEngine(this.config, client, qualityScorer);
     this.escalationEngine = new EscalationEngine(this.config);

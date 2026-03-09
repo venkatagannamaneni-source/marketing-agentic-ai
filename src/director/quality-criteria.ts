@@ -5,6 +5,7 @@ import type {
   QualityThreshold,
 } from "../types/quality.ts";
 import { DEFAULT_QUALITY_THRESHOLD } from "../types/quality.ts";
+import type { DomainRegistry } from "../domain/domain-registry.ts";
 
 // ── Default Dimension Profiles ───────────────────────────────────────────────
 
@@ -299,4 +300,50 @@ export function resolveThreshold(
   }
   const criteria = DEFAULT_SKILL_CRITERIA[skill];
   return criteria?.threshold ?? DEFAULT_QUALITY_THRESHOLD;
+}
+
+// ── Domain-Aware Criteria Builder ───────────────────────────────────────────
+
+/**
+ * Build a skill criteria registry from domain configuration.
+ * Falls back to DEFAULT_SKILL_CRITERIA for skills not defined in domain config.
+ */
+export function buildSkillCriteriaFromDomain(
+  domainRegistry: DomainRegistry,
+): Readonly<Record<string, SkillQualityCriteria>> {
+  const quality = domainRegistry.quality;
+  const result: Record<string, SkillQualityCriteria> = {};
+
+  // Build profile → dimensions lookup
+  const profileDimensions: Record<string, readonly SkillDimensionCriteria[]> = {};
+  for (const [profileName, weights] of Object.entries(quality.profiles)) {
+    profileDimensions[profileName] = weights.map((w) => ({
+      dimension: w.dimension,
+      weight: w.weight,
+      minScore: w.min_score,
+    }));
+  }
+
+  // Build threshold from domain config
+  const threshold: QualityThreshold = {
+    approveAbove: quality.thresholds.approve_above,
+    reviseBelow: quality.thresholds.revise_below,
+    rejectBelow: quality.thresholds.reject_below,
+  };
+
+  // Build criteria for each skill
+  for (const [skillName, criteria] of Object.entries(quality.skill_criteria)) {
+    const dimensions = profileDimensions[criteria.profile];
+    if (!dimensions) continue;
+
+    result[skillName] = {
+      skill: skillName,
+      dimensions,
+      threshold,
+      requiredSections: [...criteria.required_sections],
+      minWordCount: criteria.min_word_count,
+    };
+  }
+
+  return Object.freeze(result);
 }

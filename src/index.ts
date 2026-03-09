@@ -230,6 +230,7 @@ export {
   DEFAULT_SKILL_CRITERIA,
   getSkillCriteria,
   resolveThreshold,
+  buildSkillCriteriaFromDomain,
   LearningValidator,
   ConsistencyChecker,
 } from "./director/index.ts";
@@ -378,6 +379,19 @@ export type {
   HealthCheckFn,
   HealthMonitorConfig,
 } from "./observability/index.ts";
+
+// ── Domain ──────────────────────────────────────────────────────────────────
+export {
+  DomainRegistry,
+  DomainRegistryError,
+  type DomainConfigData,
+  type DomainCategory,
+  type DomainPhaseBlueprint,
+  type DomainDirectorConfig,
+  type DomainDimensionWeight,
+  type DomainSkillCriteria,
+  type DomainQualityConfig,
+} from "./domain/index.ts";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 export {

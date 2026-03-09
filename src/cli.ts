@@ -77,7 +77,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 // ── Help Text ──────────────────────────────────────────────────────────────
 
 const HELP_TEXT = `
-Marketing Agentic AI — Phase 2 Runtime
+Agentic AI — Phase 2 Runtime (domain configured via .agents/domain.yaml)
 
 Usage:
   bun run start "goal description"           Run a single goal to completion

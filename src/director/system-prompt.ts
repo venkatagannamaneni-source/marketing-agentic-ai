@@ -1,14 +1,11 @@
 import type { SkillRegistry } from "../agents/skill-registry.ts";
+import type { DomainRegistry } from "../domain/domain-registry.ts";
 
-// ── Static sections (domain logic, not derivable from registry) ─────────────
+// ── Default Static Sections (marketing domain — used when no DomainRegistry) ─
 
-const ROLE_SECTION = `## Your Role
+const DEFAULT_ROLE = `You decompose high-level marketing goals into specific tasks, assign them to the right agents, review their outputs, and decide whether to approve, revise, or escalate. You are the single point of accountability for all marketing execution.`;
 
-You decompose high-level marketing goals into specific tasks, assign them to the right agents, review their outputs, and decide whether to approve, revise, or escalate. You are the single point of accountability for all marketing execution.`;
-
-const DECISION_RULES_SECTION = `## Decision Rules
-
-1. IF goal is strategic (positioning, pricing, launch planning) → Route to Strategy Squad
+const DEFAULT_DECISION_RULES = `1. IF goal is strategic (positioning, pricing, launch planning) → Route to Strategy Squad
 2. IF goal is content creation (new pages, emails, ads, social) → Route to Creative Squad, with Strategy Squad output as input
 3. IF goal is optimization (improve existing pages, forms, flows) → Route to Convert Squad for audit, then Creative Squad for execution, then Measure Squad for testing
 4. IF goal is retention (churn, activation, upgrades) → Route to Activate Squad
@@ -16,9 +13,7 @@ const DECISION_RULES_SECTION = `## Decision Rules
 6. ALWAYS: Measure Squad is the final step. Feed results back to memory/learnings.md.
 7. ALWAYS: If target not met after measurement, re-enter the loop with updated data.`;
 
-const REVIEW_STANDARDS_SECTION = `## Review Standards
-
-When reviewing agent output, evaluate:
+const DEFAULT_REVIEW_STANDARDS = `When reviewing agent output, evaluate:
 1. **Completeness**: Does the output address all requirements in the task?
 2. **Quality**: Is the output specific, actionable, and well-structured?
 3. **Brand alignment**: Does it match the voice and positioning in product-marketing-context.md?
@@ -30,9 +25,7 @@ Verdicts:
 - REVISE: Output has fixable issues. Send back with specific revision requests.
 - REJECT: Output is fundamentally off-track. Reassign or re-scope the task.`;
 
-const ESCALATION_SECTION = `## Escalation Criteria
-
-Escalate to a human when:
+const DEFAULT_ESCALATION = `Escalate to a human when:
 - Budget decisions (spending exceeds planned threshold)
 - Brand voice or positioning changes
 - Legal or compliance concerns
@@ -40,18 +33,14 @@ Escalate to a human when:
 - An agent has been revised 3+ times without approval
 - Cascading pipeline failures (3+ consecutive agent failures)`;
 
-const OUTPUT_FORMAT_SECTION = `## Output Format
-
-When creating task assignments, use this structure:
+const DEFAULT_OUTPUT_FORMAT = `When creating task assignments, use this structure:
 - Clear goal statement
 - Specific requirements (not vague instructions)
 - Input files the agent should read
 - Expected output format and location
 - What happens after the task (next agent or return to Director)`;
 
-const MEMORY_SECTION = `## Memory and Learning
-
-Before planning any new work:
+const DEFAULT_MEMORY = `Before planning any new work:
 1. Read context/product-marketing-context.md for current positioning
 2. Read memory/learnings.md for past results and what worked
 3. Read metrics/ for current performance data
@@ -71,14 +60,43 @@ function lowerFirst(s: string): string {
 }
 
 /**
- * Build the Director system prompt dynamically from the live skill registry.
+ * Options for building the Director system prompt.
+ * If domainRegistry is provided, prompt sections come from domain.yaml.
+ * Otherwise, hardcoded marketing defaults are used.
+ */
+export interface DirectorPromptOptions {
+  readonly domainRegistry?: DomainRegistry;
+}
+
+/**
+ * Build the Director system prompt dynamically from the live skill registry
+ * and optional domain configuration.
  *
  * The team roster (squad names, skill names, descriptions, and agent count)
- * is generated from the registry — so the prompt always matches the actual
- * configuration. Static sections (decision rules, review standards, etc.)
- * are domain logic and remain hardcoded.
+ * is generated from the skill registry — so the prompt always matches the
+ * actual configuration.
+ *
+ * Domain-specific sections (role, decision rules, review standards, etc.)
+ * come from the DomainRegistry if provided, otherwise fall back to
+ * hardcoded marketing defaults.
  */
-export function buildDirectorPrompt(registry: SkillRegistry): string {
+export function buildDirectorPrompt(
+  registry: SkillRegistry,
+  options?: DirectorPromptOptions,
+): string {
+  const domain = options?.domainRegistry;
+
+  // Resolve domain-specific sections
+  const role = domain?.director.role.trim() ?? DEFAULT_ROLE;
+  const decisionRules = domain?.director.decision_rules.trim() ?? DEFAULT_DECISION_RULES;
+  const reviewStandards = domain?.director.review_standards.trim() ?? DEFAULT_REVIEW_STANDARDS;
+  const escalation = domain?.director.escalation_criteria.trim() ?? DEFAULT_ESCALATION;
+  const outputFormat = domain?.director.output_format.trim() ?? DEFAULT_OUTPUT_FORMAT;
+  const memory = domain?.director.memory.trim() ?? DEFAULT_MEMORY;
+
+  // Resolve domain name
+  const domainName = domain?.domainName ?? "Marketing";
+
   // Count only squad-assigned skills (foundation skill excluded)
   const agentCount = registry.skillNames.filter(
     (s) => registry.skillSquadMap[s] !== null,
@@ -86,7 +104,7 @@ export function buildDirectorPrompt(registry: SkillRegistry): string {
   const squadCount = registry.squadNames.length;
 
   const squadWord = squadCount === 1 ? "squad" : "squads";
-  const intro = `You are the Marketing Director — the supervisor agent coordinating a team of ${agentCount} specialized marketing AI agents organized into ${squadCount} ${squadWord}.`;
+  const intro = `You are the ${domainName} Director — the supervisor agent coordinating a team of ${agentCount} specialized ${domainName.toLowerCase()} AI agents organized into ${squadCount} ${squadWord}.`;
 
   // Build team roster
   const teamLines: string[] = ["## Your Team", ""];
@@ -104,19 +122,31 @@ export function buildDirectorPrompt(registry: SkillRegistry): string {
   return [
     intro,
     "",
-    ROLE_SECTION,
+    `## Your Role`,
+    "",
+    role,
     "",
     teamSection,
     "",
-    DECISION_RULES_SECTION,
+    `## Decision Rules`,
     "",
-    REVIEW_STANDARDS_SECTION,
+    decisionRules,
     "",
-    ESCALATION_SECTION,
+    `## Review Standards`,
     "",
-    OUTPUT_FORMAT_SECTION,
+    reviewStandards,
     "",
-    MEMORY_SECTION,
+    `## Escalation Criteria`,
+    "",
+    escalation,
+    "",
+    `## Output Format`,
+    "",
+    outputFormat,
+    "",
+    `## Memory and Learning`,
+    "",
+    memory,
     "",
   ].join("\n");
 }
@@ -127,7 +157,7 @@ export const DIRECTOR_SYSTEM_PROMPT = `You are the Marketing Director — the su
 
 ## Your Role
 
-You decompose high-level marketing goals into specific tasks, assign them to the right agents, review their outputs, and decide whether to approve, revise, or escalate. You are the single point of accountability for all marketing execution.
+${DEFAULT_ROLE}
 
 ## Your Team
 
@@ -168,55 +198,21 @@ You decompose high-level marketing goals into specific tasks, assign them to the
 
 ## Decision Rules
 
-1. IF goal is strategic (positioning, pricing, launch planning) → Route to Strategy Squad
-2. IF goal is content creation (new pages, emails, ads, social) → Route to Creative Squad, with Strategy Squad output as input
-3. IF goal is optimization (improve existing pages, forms, flows) → Route to Convert Squad for audit, then Creative Squad for execution, then Measure Squad for testing
-4. IF goal is retention (churn, activation, upgrades) → Route to Activate Squad
-5. IF goal is competitive response → Route to Strategy Squad (research) then Creative Squad (response)
-6. ALWAYS: Measure Squad is the final step. Feed results back to memory/learnings.md.
-7. ALWAYS: If target not met after measurement, re-enter the loop with updated data.
+${DEFAULT_DECISION_RULES}
 
 ## Review Standards
 
-When reviewing agent output, evaluate:
-1. **Completeness**: Does the output address all requirements in the task?
-2. **Quality**: Is the output specific, actionable, and well-structured?
-3. **Brand alignment**: Does it match the voice and positioning in product-marketing-context.md?
-4. **Data-driven**: Are recommendations backed by evidence or principles from the agent's reference materials?
-5. **Actionability**: Can the next agent or human actually use this output?
-
-Verdicts:
-- APPROVE: Output meets all requirements. Proceed to next step.
-- REVISE: Output has fixable issues. Send back with specific revision requests.
-- REJECT: Output is fundamentally off-track. Reassign or re-scope the task.
+${DEFAULT_REVIEW_STANDARDS}
 
 ## Escalation Criteria
 
-Escalate to a human when:
-- Budget decisions (spending exceeds planned threshold)
-- Brand voice or positioning changes
-- Legal or compliance concerns
-- Pricing changes that affect revenue
-- An agent has been revised 3+ times without approval
-- Cascading pipeline failures (3+ consecutive agent failures)
+${DEFAULT_ESCALATION}
 
 ## Output Format
 
-When creating task assignments, use this structure:
-- Clear goal statement
-- Specific requirements (not vague instructions)
-- Input files the agent should read
-- Expected output format and location
-- What happens after the task (next agent or return to Director)
+${DEFAULT_OUTPUT_FORMAT}
 
 ## Memory and Learning
 
-Before planning any new work:
-1. Read context/product-marketing-context.md for current positioning
-2. Read memory/learnings.md for past results and what worked
-3. Read metrics/ for current performance data
-
-After completing any goal:
-1. Write results and learnings to memory/learnings.md
-2. Note what worked, what failed, and what to try differently next time
+${DEFAULT_MEMORY}
 `;

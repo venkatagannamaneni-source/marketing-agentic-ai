@@ -182,11 +182,9 @@ export class RoutingRegistry {
   validate(): void {
     const errors: string[] = [];
 
-    for (const category of this._rules.keys()) {
-      if (!(GOAL_CATEGORIES as readonly string[]).includes(category)) {
-        errors.push(`Unknown goal category: "${category}"`);
-      }
-    }
+    // Goal category validation is deferred — categories may be dynamically
+    // defined in domain.yaml rather than the hardcoded GOAL_CATEGORIES list.
+    // Use validateAgainstCategories() for cross-validation with domain config.
 
     for (const [category, routes] of this._rules.entries()) {
       if (routes.length === 0) {
@@ -220,6 +218,24 @@ export class RoutingRegistry {
     if (errors.length > 0) {
       throw new RoutingRegistryError(
         `Routing registry validation failed with ${errors.length} error(s):\n${errors.map((e) => `  - ${e}`).join("\n")}`,
+        errors,
+      );
+    }
+  }
+
+  /**
+   * Validate category names against a known list (from DomainRegistry or defaults).
+   */
+  validateAgainstCategories(validCategories: readonly string[]): void {
+    const errors: string[] = [];
+    for (const category of this._rules.keys()) {
+      if (!validCategories.includes(category)) {
+        errors.push(`Unknown goal category: "${category}"`);
+      }
+    }
+    if (errors.length > 0) {
+      throw new RoutingRegistryError(
+        `Routing registry category validation failed with ${errors.length} error(s):\n${errors.map((e) => `  - ${e}`).join("\n")}`,
         errors,
       );
     }

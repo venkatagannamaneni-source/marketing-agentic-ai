@@ -181,22 +181,29 @@ describe("ScheduleRegistry validation", () => {
     expect(() => ScheduleRegistry.fromData(bad)).toThrow(/invalid priority/);
   });
 
-  it("rejects invalid goalCategory", () => {
-    const bad: ScheduleRegistryData = {
+  it("allows unknown goalCategory at construction (deferred validation)", () => {
+    // Categories are no longer validated at construction time because they
+    // may be dynamically defined in domain.yaml.
+    const data: ScheduleRegistryData = {
       schedules: [
         {
-          id: "bad-cat",
-          name: "Bad Category",
+          id: "custom-cat",
+          name: "Custom Category",
           cron: "0 9 * * *",
           pipelineId: "goal:test",
           enabled: true,
-          description: "Bad category",
+          description: "Custom category",
           goalCategory: "nonexistent",
         },
       ],
     };
-    expect(() => ScheduleRegistry.fromData(bad)).toThrow(ScheduleRegistryError);
-    expect(() => ScheduleRegistry.fromData(bad)).toThrow(/invalid goalCategory/);
+    const registry = ScheduleRegistry.fromData(data);
+    expect(registry.schedules).toHaveLength(1);
+
+    // But validateAgainstCategories() catches them
+    expect(() =>
+      registry.validateAgainstCategories(["strategic", "content"]),
+    ).toThrow(ScheduleRegistryError);
   });
 
   it("collects multiple errors", () => {
@@ -220,7 +227,8 @@ describe("ScheduleRegistry validation", () => {
     } catch (e) {
       expect(e).toBeInstanceOf(ScheduleRegistryError);
       const err = e as ScheduleRegistryError;
-      expect(err.errors.length).toBeGreaterThanOrEqual(3);
+      // cron error + priority error = 2 errors (goalCategory deferred)
+      expect(err.errors.length).toBeGreaterThanOrEqual(2);
     }
   });
 });

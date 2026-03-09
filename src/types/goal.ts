@@ -2,6 +2,9 @@ import type { SkillName } from "./agent.ts";
 import type { Priority } from "./task.ts";
 
 // ── Goal Categories ─────────────────────────────────────────────────────────
+// Default marketing categories are kept for backward compatibility.
+// At runtime, the DomainRegistry may provide different categories.
+// GoalCategory is widened to `string` so domain-specific categories work.
 
 export const GOAL_CATEGORIES = [
   "strategic",
@@ -12,7 +15,11 @@ export const GOAL_CATEGORIES = [
   "measurement",
 ] as const;
 
-export type GoalCategory = (typeof GOAL_CATEGORIES)[number];
+/**
+ * Goal category type. Accepts the built-in marketing defaults and any
+ * custom category string loaded from domain.yaml at runtime.
+ */
+export type GoalCategory = (typeof GOAL_CATEGORIES)[number] | (string & {});
 
 // ── Goal ─────────────────────────────────────────────────────────────────────
 

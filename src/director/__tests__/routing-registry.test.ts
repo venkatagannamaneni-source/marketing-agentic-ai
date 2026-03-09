@@ -64,16 +64,24 @@ describe("RoutingRegistry.fromData", () => {
 // ── Validation ──────────────────────────────────────────────────────────────
 
 describe("RoutingRegistry validation", () => {
-  it("rejects unknown goal categories", () => {
-    const bad: RoutingRegistryData = {
+  it("allows unknown goal categories at construction (deferred validation)", () => {
+    // Categories are no longer validated at construction time because they
+    // may be dynamically defined in domain.yaml. Use validateAgainstCategories()
+    // for explicit cross-validation.
+    const data: RoutingRegistryData = {
       rules: {
         nonexistent_category: [
           { squad: "strategy", skills: ["content-strategy"], reason: "x" },
         ],
       },
     };
-    expect(() => RoutingRegistry.fromData(bad)).toThrow(RoutingRegistryError);
-    expect(() => RoutingRegistry.fromData(bad)).toThrow(/Unknown goal category/);
+    const registry = RoutingRegistry.fromData(data);
+    expect(registry.categories).toContain("nonexistent_category");
+
+    // But validateAgainstCategories() catches them
+    expect(() =>
+      registry.validateAgainstCategories(["strategic", "content"]),
+    ).toThrow(RoutingRegistryError);
   });
 
   it("rejects empty skills list", () => {

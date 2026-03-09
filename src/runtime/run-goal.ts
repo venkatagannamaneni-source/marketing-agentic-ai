@@ -1,6 +1,7 @@
 import type { Application } from "../bootstrap.ts";
 import type { GoalCategory } from "../types/goal.ts";
 import type { Priority, TaskStatus } from "../types/task.ts";
+import type { DomainRegistry } from "../domain/domain-registry.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,7 +36,22 @@ const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set(["approved", "failed"
 
 // ── Category Inference ───────────────────────────────────────────────────────
 
-export function inferCategory(description: string): GoalCategory {
+/**
+ * Infer goal category from a natural language description.
+ *
+ * If a DomainRegistry is provided, uses its configured patterns.
+ * Otherwise falls back to hardcoded marketing defaults.
+ */
+export function inferCategory(
+  description: string,
+  domainRegistry?: DomainRegistry,
+): GoalCategory {
+  // Use domain config patterns if available
+  if (domainRegistry) {
+    return domainRegistry.inferCategory(description) as GoalCategory;
+  }
+
+  // Hardcoded marketing defaults (backward compatibility)
   const lower = description.toLowerCase();
 
   // Order: specific categories first, generic ("page") last to avoid shadowing
@@ -79,8 +95,8 @@ export async function runGoal(
 ): Promise<GoalResult> {
   const startTime = Date.now();
 
-  // 1. Determine category
-  const category = options.category ?? inferCategory(goalDescription);
+  // 1. Determine category (use domain config if available)
+  const category = options.category ?? inferCategory(goalDescription, app.domainRegistry);
   const priority = options.priority ?? "P2";
 
   app.logger.info("Creating goal", { description: goalDescription, category, priority });
