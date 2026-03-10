@@ -215,6 +215,31 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
     }
   }
 
+  // 2g. Cross-validate registries against domain categories (if domain loaded)
+  if (domainRegistry) {
+    const validCategories = domainRegistry.categoryNames;
+    if (routingRegistry) {
+      try {
+        routingRegistry.validateAgainstCategories(validCategories);
+        logger.debug("Routing registry categories validated against domain config");
+      } catch (err: unknown) {
+        logger.warn("Routing registry category mismatch with domain config", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    if (scheduleRegistry) {
+      try {
+        scheduleRegistry.validateAgainstCategories(validCategories);
+        logger.debug("Schedule registry categories validated against domain config");
+      } catch (err: unknown) {
+        logger.warn("Schedule registry category mismatch with domain config", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
   // 3. Workspace
   const workspace = new FileSystemWorkspaceManager({
     rootDir: config.workspace.rootDir,

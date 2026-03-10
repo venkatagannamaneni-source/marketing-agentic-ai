@@ -53,6 +53,7 @@ export type {
   QualityReviewResult,
   ReviewDepth,
   SemanticReviewConfig,
+  DomainSkillCriteriaMap,
 } from "./review-engine.ts";
 
 // ── Escalation Engine ────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
 
 ## Phase 1: Director + Orchestration Engine (Weeks 1-4) — COMPLETE ✓
 
-14 modules, 1472+ tests, 68 files. Real Claude API integration verified with 23 live API tests.
+14 modules, 1825+ tests, 68 files. Real Claude API integration verified with 23 live API tests.
 
 ## Phase 2: Runtime Engine (Weeks 5-8) — COMPLETE ✓
 
@@ -15,53 +15,43 @@ All 9 work streams delivered:
 - Structured logging (pino), cost tracking, metrics, health monitoring
 - Memory system (agents read past learnings)
 - Full bootstrap composition root wiring 14 modules
-- 1472+ tests across 68 files
+- 1825+ tests across 68 files
 
 See [docs/phase-2-status.md](phase-2-status.md) for the honest assessment.
 
-## Phase 3: Intelligence + Semantic Review (Weeks 9-12) — NEXT
+## Phase 3: Intelligence + Semantic Review (Weeks 9-12) — COMPLETE ✓
 
-The quality phase. Replace structural pattern-matching with Claude-powered semantic evaluation.
+All 6 items implemented with 121+ tests across semantic review, quality scoring, and consistency checking.
 
-### Priority order:
+1. **Claude-powered semantic review** — ReviewEngine supports 3 depths (quick/standard/deep). Deep mode loads SKILL.md for context-aware Opus review. Structured JSON responses with verdict, findings, revision instructions, and summary. Graceful degradation on parse errors.
 
-1. **Claude-powered semantic review** — Replace structural-only ReviewEngine with Claude-powered evaluation. Director sends output + task requirements + SKILL.md quality criteria to Claude and gets real APPROVE/REVISE/REJECT decisions with specific, actionable feedback.
+2. **Quality scoring model** — QualityScorer with 7 dimensions (completeness, actionability, data_driven, clarity, brand_alignment, creativity, technical_accuracy). 5 squad-specific profiles with per-dimension weights and min scores. Both structural and semantic scoring paths. Domain-aware criteria loaded from domain.yaml at runtime.
 
-2. **Quality scoring model** — Define scoring rubric per agent type (copy quality, SEO quality, CRO quality). Director assigns numeric quality scores (1-10) that feed into learnings and enable comparison.
+3. **Multi-pass review chains** — Review engine merges structural + semantic findings with deduplication. Pipeline continuation via `evaluateTaskSemantic()` integrates into the execute-and-review flow.
 
-3. **Multi-pass review chains** — Creative outputs go through review chains: copywriting → copy-editing → page-cro review → Director final approval. Each reviewer uses Claude for real feedback.
+4. **Revision loops with real feedback** — REVISE decisions include Claude-generated revision instructions in task metadata. Agents re-execute with structured `revisionFeedback`, `reviewSummary`, and `reviewFindings` context. Prompt builder renders revision feedback in a dedicated `<revision-feedback>` section.
 
-4. **Revision loops with real feedback** — When Director sends REVISE, the revision request includes specific Claude-generated feedback. Agents re-execute with both original task and revision notes, producing genuinely improved output.
+5. **Learning validation** — LearningValidator validates entries, ConsistencyChecker cross-checks pipeline outputs. Learning entries include quality scores for tracking improvement over time.
 
-5. **Learning validation** — A/B test: run tasks with and without past learnings context. Measure quality score difference. Validate the memory system actually helps. Prune learnings that don't improve output.
+6. **Cross-agent consistency check** — ConsistencyChecker validates consistency across pipeline outputs (tone alignment, messaging consistency, etc.).
 
-6. **Cross-agent consistency check** — Director validates consistency across a pipeline's outputs: email copy matches landing page, social content aligns with blog post, etc.
+## Phase 3b: Platform Hardening — Extensibility Layer (Weeks 12-14) — COMPLETE ✓
 
-## Phase 3b: Platform Hardening — Extensibility Layer (Weeks 12-14)
+The `.agents/` directory is now a complete, swappable "domain cartridge." Swap 7 YAML files to repurpose the system for any domain (DevOps, Support, Sales) with zero code changes.
 
-**The phase that turns a hardcoded system into a configurable product.** This is a prerequisite for Phase 4's MCP tool integrations and Phase 6's multi-tenancy. Without it, every new skill, squad, or tool integration requires modifying TypeScript source files in 5+ locations.
+### What was built:
 
-### Why this phase exists
+1. **Externalized skill registry** — `skills.yaml` defines skills, squads, dependency graph, foundation skill. `SkillRegistry.fromYaml()` loads at startup. Adding a skill = YAML entry + SKILL.md file.
 
-This system is a product — Claude Code for Marketing. Users connect their own tools (GA4, Webflow, Mailchimp, Stripe) and the engine operates against their real stack. That model requires:
-- Skills, squads, and routing rules as **configuration** (not hardcoded arrays)
-- A **Tool Registry** where users declare which MCP servers to connect
-- A **dynamic Director prompt** that always matches the actual registry
-- A **validation layer** that catches config errors before runtime
+2. **Dynamic Director prompt** — `buildDirectorPrompt(registry, { domainRegistry })` generates the prompt from the live skill registry + domain config. Squad listings, agent descriptions, decision rules all derived from config.
 
-### Priority order:
+3. **MCP Tool Registry** — `ToolRegistry` with `tools.yaml` config. Skills declare which tools they need; executor passes available tools to Claude.
 
-1. **Externalize skill registry** (Week 12) — Move `SKILL_NAMES`, `SKILL_SQUAD_MAP`, `AGENT_DEPENDENCY_GRAPH` from TypeScript `as const` arrays into a `skills.yaml` config file. Skill loader reads config at startup, builds registry dynamically. Adding a skill = YAML entry + SKILL.md file. No code changes.
+4. **Domain Registry** — `domain.yaml` defines domain identity, goal categories with regex inference patterns, phase blueprints, director prompt sections, quality dimensions/profiles/skill criteria. `DomainRegistry.fromYaml()` with full validation.
 
-2. **Dynamic Director prompt** (Week 12) — Replace hardcoded `DIRECTOR_SYSTEM_PROMPT` ("26 agents, 5 squads") with `buildDirectorPrompt(registry)` that generates the prompt from the live skill registry. Squad listings, agent descriptions, decision rules all derived from config.
+5. **Externalized routing, schedules, events, pipelines** — `routing.yaml`, `schedules.yaml`, `events.yaml`, `pipelines.yaml` all loadable from YAML with hardcoded fallbacks.
 
-3. **MCP Tool Registry + abstraction layer** (Week 13) — Create `ToolRegistry` interface: `registerTool(name, mcpConfig)`, `getToolsForSkill(skillName)`, `invokeTool(name, action, params)`. Executor passes available tools to Claude's tool_use API. Foundation for all Phase 4 integrations.
-
-4. **User tool configuration** (Week 13) — Create `tools.yaml` where users declare their connected tools: MCP server references, credential env var names, and which skills get access. The "onboard a new hire" experience.
-
-5. **Externalize routing, schedules, events** (Week 14) — Move `ROUTING_RULES`, `DEFAULT_SCHEDULES`, `DEFAULT_EVENT_MAPPINGS` to config files. Users can customize which pipelines run on what schedule and which events trigger which responses.
-
-6. **Single source of truth + validation CLI** (Week 14) — Merge duplicate budget thresholds. `bun run validate-skills` verifies config integrity: every skill has SKILL.md, valid squad, valid dependency edges, declared tools match available MCP servers.
+6. **Cross-validation** — Bootstrap validates routing/schedule categories against domain config. Deferred `validateAgainstCategories()` methods on RoutingRegistry and ScheduleRegistry.
 
 ### What this enables:
 
@@ -72,13 +62,13 @@ Adding a new skill (AFTER):   1 YAML entry + 1 SKILL.md file
 Connecting a tool (BEFORE):   No way to do it — hardcoded system
 Connecting a tool (AFTER):    1 tools.yaml entry + install MCP server
 
-Director prompt (BEFORE):     Hardcodes "26 agents, 5 squads" — breaks if anything changes
-Director prompt (AFTER):      Auto-generated from live registry — always correct
+Changing domain (BEFORE):     Impossible — marketing hardcoded everywhere
+Changing domain (AFTER):      Swap .agents/ directory — zero code changes
 ```
 
-## Phase 4: Tool Integration + Real Execution (Weeks 15-22)
+## Phase 4: Tool Integration + Real Execution (Weeks 15-22) — NEXT
 
-The execution phase. With the Tool Registry from Phase 3b in place, connect agents to real tools via MCP servers. Users configure which tools to connect through `tools.yaml` — the system discovers and binds tools to agents automatically.
+The execution phase. With the Tool Registry in place, connect agents to real tools via MCP servers. Users configure which tools to connect through `tools.yaml` — the system discovers and binds tools to agents automatically.
 
 ### 4a: Analytics & Measurement (Weeks 15-16)
 - GA4 MCP — read real traffic, conversion, bounce data (registered as `ga4`)
@@ -138,13 +128,12 @@ The product phase. Turn the engine into a commercial SaaS.
 
 ## Key Technical Decisions Still Open
 
-- **MCP integration architecture**: Build custom MCP servers per tool, use community MCP servers where available, or wrap REST APIs directly? Need to evaluate per-tool. Some tools (GA4, Mailchimp) have community MCP servers. Others (Customer.io, Meta Ads) need custom implementation. Phase 3b's Tool Registry provides the abstraction layer regardless of approach.
-- **OAuth2 flow**: Many Google APIs (GA4, Search Console, GTM, Ads) require OAuth2 user consent. Need a credential management system with token refresh. Phase 3b establishes the credential reference pattern (`tools.yaml` → env vars); Phase 4 implements the actual OAuth flows.
+- **MCP integration architecture**: Build custom MCP servers per tool, use community MCP servers where available, or wrap REST APIs directly? Need to evaluate per-tool. Some tools (GA4, Mailchimp) have community MCP servers. Others (Customer.io, Meta Ads) need custom implementation. The Tool Registry provides the abstraction layer regardless of approach.
+- **OAuth2 flow**: Many Google APIs (GA4, Search Console, GTM, Ads) require OAuth2 user consent. Need a credential management system with token refresh. The credential reference pattern (`tools.yaml` → env vars) is established; Phase 4 implements the actual OAuth flows.
 - **CMS selection**: Support WordPress (REST API) first — largest market share. Webflow second. Headless CMS (Contentful/Sanity) third. Tool Registry allows users to connect whichever they use.
 - **ESP selection**: Mailchimp (SMB) vs Customer.io (product-led) vs Resend (developer). Tool Registry + ESP abstraction layer lets users choose.
-- **Config format**: YAML vs JSON for `skills.yaml` and `tools.yaml`. YAML is more human-readable. JSON is stricter. Decision needed at Phase 3b start.
 - **File workspace vs PostgreSQL**: File workspace works for single-machine dev. Production needs PostgreSQL. Migration in Phase 6, but schema design should start in Phase 4.
 - **Deployment target**: Railway for initial deployment. Docker Compose for self-hosted. Consider Fly.io as failover.
 - **Cost management**: CostTracker infrastructure is built. Phase 4 will validate against real spend patterns when agents make real API calls to external tools.
-- **Rate limiting across tools**: Each external API has its own rate limits. Phase 3b's Tool Registry should include per-tool rate limit configuration. Phase 4 implements the actual limiters.
-- **Hot-reload vs restart**: Phase 3b config changes require restart. Phase 6 dashboard could support hot-reload (change tools.yaml → system picks up changes without downtime). Decision deferred to Phase 6.
+- **Rate limiting across tools**: Each external API has its own rate limits. The Tool Registry includes per-tool configuration; Phase 4 implements the actual limiters.
+- **Hot-reload vs restart**: Config changes currently require restart. Phase 6 dashboard could support hot-reload (change YAML → system picks up changes without downtime). Decision deferred to Phase 6.

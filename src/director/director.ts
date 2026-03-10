@@ -25,7 +25,8 @@ import { DIRECTOR_SYSTEM_PROMPT, buildDirectorPrompt } from "./system-prompt.ts"
 import { GoalDecomposer } from "./goal-decomposer.ts";
 import { PipelineFactory } from "./pipeline-factory.ts";
 import { ReviewEngine } from "./review-engine.ts";
-import type { SemanticReviewConfig } from "./review-engine.ts";
+import type { SemanticReviewConfig, DomainSkillCriteriaMap } from "./review-engine.ts";
+import { buildSkillCriteriaFromDomain } from "./quality-criteria.ts";
 import type { QualityScorer } from "./quality-scorer.ts";
 import { EscalationEngine } from "./escalation.ts";
 import { routeGoal, routeGoalFromRegistry } from "./squad-router.ts";
@@ -93,7 +94,10 @@ export class MarketingDirector {
       : DIRECTOR_SYSTEM_PROMPT;
     this.goalDecomposer = new GoalDecomposer(PIPELINE_TEMPLATES, registry, domainRegistry);
     this.pipelineFactory = new PipelineFactory(PIPELINE_TEMPLATES, registry);
-    this.reviewEngine = new ReviewEngine(this.config, client, qualityScorer);
+    const domainCriteria = domainRegistry
+      ? buildSkillCriteriaFromDomain(domainRegistry)
+      : undefined;
+    this.reviewEngine = new ReviewEngine(this.config, client, qualityScorer, domainCriteria);
     this.escalationEngine = new EscalationEngine(this.config);
     this.routingRegistry = routingRegistry;
   }

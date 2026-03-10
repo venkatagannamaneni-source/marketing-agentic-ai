@@ -26,6 +26,14 @@ import type { QualityScore, SkillQualityCriteria } from "../types/quality.ts";
 import type { QualityScorer } from "./quality-scorer.ts";
 import { getSkillCriteria } from "./quality-criteria.ts";
 
+// ── Domain-Aware Criteria Registry ─────────────────────────────────────────
+
+/**
+ * Optional registry of skill quality criteria built from domain.yaml.
+ * When provided, the ReviewEngine uses these instead of the hardcoded defaults.
+ */
+export type DomainSkillCriteriaMap = Readonly<Record<string, SkillQualityCriteria>>;
+
 // ── Review Depth ────────────────────────────────────────────────────────────
 
 /**
@@ -104,6 +112,7 @@ export class ReviewEngine {
     private readonly config: DirectorConfig,
     private readonly client?: ClaudeClient,
     private readonly qualityScorer?: QualityScorer,
+    private readonly domainCriteria?: DomainSkillCriteriaMap,
   ) {}
 
   /**
@@ -344,7 +353,7 @@ export class ReviewEngine {
     // 8. Quality scoring (automatic when QualityScorer is wired in)
     let qualityScore: QualityScore | undefined;
     if (this.qualityScorer) {
-      const criteria = getSkillCriteria(task.to);
+      const criteria = this.domainCriteria?.[task.to] ?? getSkillCriteria(task.to);
       // Use structural scoring (free) — semantic review already happened above
       qualityScore = this.qualityScorer.scoreStructural(task, outputContent, criteria);
     }

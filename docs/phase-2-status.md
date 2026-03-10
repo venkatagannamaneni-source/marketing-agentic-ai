@@ -1,7 +1,7 @@
 # Phase 2 Status — Honest Assessment
 
 **Completed:** Feb 21, 2026
-**Tests:** 1447 pass, 0 fail, 4168 assertions across 67 test files
+**Tests:** 1825 pass, 0 fail, 5122 assertions across 82 test files
 **Code:** ~35k lines TypeScript (src/ including tests)
 
 ## What Was Built (9 Work Streams)
@@ -28,8 +28,8 @@
 | Pipeline sequencing + parallel | Yes | — |
 | Claude API client | **Real** (AnthropicClaudeClient wraps SDK) | MockClaudeClient in tests |
 | Redis / BullMQ | **Real** (BullMQ adapters + Docker Redis) | Mock adapters in tests |
-| Director decision-making | Structural + deterministic routing | No real AI judgment in decomposition |
-| Review engine | Pattern matching + structural checks | Semantic review mocked |
+| Director decision-making | Structural + deterministic routing + Claude semantic review | No real AI judgment in decomposition |
+| Review engine | Structural checks + Claude semantic review (3 depths: quick/standard/deep) + dimensional quality scoring | — |
 | Event bus | **Real** (emission + pipeline triggering + cooldown + dedup) | — |
 | Scheduler | **Real** (cron matching + budget gating + overlap protection) | Clock injectable for testing |
 | Cost tracking | **Real** (accumulates costs, budget state transitions) | — |
@@ -68,7 +68,6 @@
 - No multi-tenancy or authentication (beyond webhook bearer token)
 - No CI/CD pipeline or deployment scripts
 - No production Redis deployment (Docker only for dev)
-- Director reviews are structural only — not semantic via Claude
 - Learning memory not yet validated by real agent improvement metrics
 - No rate limiting beyond budget gate
 
@@ -88,4 +87,4 @@ To reach production MVP:
 3. Validate real Claude outputs are useful marketing content
 4. Set up monitoring/alerting on cost tracker and health endpoint
 5. Add CI/CD for automated testing and deployment
-6. Replace structural reviews with Claude-powered semantic evaluation
+6. Validate real Claude review quality with production workloads
