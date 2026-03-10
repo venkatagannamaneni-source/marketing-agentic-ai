@@ -3,23 +3,188 @@
 # Declare which external tools agents can access.
 # Each tool is bound to specific skills — only authorized skills can invoke it.
 #
-# To add a tool:
-#   1. Add an entry under `tools:` below
-#   2. Restart the system
-#
-# Example:
-#   ga4:
-#     description: "Google Analytics 4 — read traffic and conversion data"
-#     provider: stub
-#     skills: [analytics-tracking, ab-test-setup]
-#     actions:
-#       - name: query-events
-#         description: "Query GA4 event data"
-#         parameters:
-#           type: object
-#           properties:
-#             start_date: { type: string }
-#             end_date: { type: string }
-#           required: [start_date, end_date]
+# Phase 4: Top 5 strategic tool integrations.
+# Tools with provider "mcp" require an MCP server package.
+# Tools with provider "rest" use HTTP endpoints or in-process handlers.
+# Tools with provider "stub" return placeholder data.
 
-tools: {}
+tools:
+  # ── 1. Playwright Browser (CRO Squad) ──────────────────────────────────
+  browser:
+    description: "Playwright browser — screenshots, page analysis, CRO audits"
+    provider: stub
+    enabled: true
+    skills: [page-cro, form-cro, signup-flow-cro, popup-cro, seo-audit, schema-markup]
+    rate_limit:
+      max_per_minute: 10
+    actions:
+      - name: screenshot
+        description: "Take a full-page screenshot of a URL"
+        parameters:
+          type: object
+          properties:
+            url: { type: string, description: "Page URL to screenshot" }
+            viewport: { type: string, description: "Viewport size WxH (e.g. 1280x720)" }
+          required: [url]
+      - name: analyze-page
+        description: "Extract page structure: headings, meta, forms, CTAs, links"
+        parameters:
+          type: object
+          properties:
+            url: { type: string, description: "Page URL to analyze" }
+          required: [url]
+      - name: get-performance
+        description: "Core Web Vitals and performance metrics for a URL"
+        parameters:
+          type: object
+          properties:
+            url: { type: string, description: "Page URL to audit" }
+          required: [url]
+
+  # ── 2. Google Analytics 4 (Measure Squad) ──────────────────────────────
+  ga4:
+    description: "Google Analytics 4 — traffic, conversions, bounce rates, user behavior"
+    provider: stub
+    enabled: true
+    credentials_env: "GA4_SERVICE_ACCOUNT_KEY"
+    mcp_server: "@anthropic/ga4-mcp"
+    skills: [analytics-tracking, ab-test-setup, seo-audit, page-cro]
+    rate_limit:
+      max_per_minute: 60
+    actions:
+      - name: query-report
+        description: "Run a GA4 Data API report with dimensions, metrics, and date range"
+        parameters:
+          type: object
+          properties:
+            property_id: { type: string, description: "GA4 property ID" }
+            start_date: { type: string, description: "Start date YYYY-MM-DD" }
+            end_date: { type: string, description: "End date YYYY-MM-DD" }
+            metrics: { type: array, description: "Metric names (e.g. sessions, conversions)" }
+            dimensions: { type: array, description: "Dimension names (e.g. pagePath, source)" }
+          required: [property_id, start_date, end_date, metrics]
+      - name: get-realtime
+        description: "Get real-time active users and events from GA4"
+        parameters:
+          type: object
+          properties:
+            property_id: { type: string, description: "GA4 property ID" }
+          required: [property_id]
+
+  # ── 3. Google Search Console (SEO Squad) ───────────────────────────────
+  search-console:
+    description: "Google Search Console — keyword rankings, impressions, CTR, index status"
+    provider: stub
+    enabled: true
+    credentials_env: "GSC_SERVICE_ACCOUNT_KEY"
+    mcp_server: "@anthropic/search-console-mcp"
+    skills: [seo-audit, content-strategy, analytics-tracking]
+    rate_limit:
+      max_per_minute: 30
+    actions:
+      - name: query-search-analytics
+        description: "Search performance data: queries, pages, impressions, clicks, CTR, position"
+        parameters:
+          type: object
+          properties:
+            site_url: { type: string, description: "Site URL (e.g. https://example.com)" }
+            start_date: { type: string, description: "Start date YYYY-MM-DD" }
+            end_date: { type: string, description: "End date YYYY-MM-DD" }
+            dimensions: { type: array, description: "Dimension names (e.g. query, page)" }
+            row_limit: { type: number, description: "Max rows to return" }
+          required: [site_url, start_date, end_date]
+      - name: get-index-status
+        description: "URL inspection and index coverage data"
+        parameters:
+          type: object
+          properties:
+            site_url: { type: string, description: "Site URL" }
+            url: { type: string, description: "Specific URL to inspect" }
+          required: [site_url, url]
+      - name: list-sitemaps
+        description: "List submitted sitemaps and their status"
+        parameters:
+          type: object
+          properties:
+            site_url: { type: string, description: "Site URL" }
+          required: [site_url]
+
+  # ── 4. WordPress CMS (Creative Squad) ──────────────────────────────────
+  wordpress:
+    description: "WordPress CMS — publish posts, pages, manage content"
+    provider: stub
+    enabled: true
+    credentials_env: "WORDPRESS_API_URL,WORDPRESS_APP_PASSWORD"
+    skills: [copywriting, programmatic-seo, schema-markup, social-content]
+    rate_limit:
+      max_per_minute: 20
+    actions:
+      - name: create-post
+        description: "Create a new WordPress post (draft by default)"
+        parameters:
+          type: object
+          properties:
+            title: { type: string, description: "Post title" }
+            content: { type: string, description: "HTML content body" }
+            status: { type: string, description: "draft or publish (default: draft)" }
+            categories: { type: array, description: "Category IDs" }
+            tags: { type: array, description: "Tag IDs" }
+          required: [title, content]
+      - name: list-posts
+        description: "List recent posts with optional filters"
+        parameters:
+          type: object
+          properties:
+            status: { type: string, description: "Filter by status (draft, publish, etc)" }
+            per-page: { type: number, description: "Results per page (default 10)" }
+            search: { type: string, description: "Search term" }
+      - name: update-post
+        description: "Update an existing WordPress post"
+        parameters:
+          type: object
+          properties:
+            post-id: { type: number, description: "WordPress post ID" }
+            title: { type: string, description: "New title" }
+            content: { type: string, description: "New HTML content" }
+            status: { type: string, description: "New status" }
+          required: [post-id]
+
+  # ── 5. Mailchimp ESP (Activate Squad) ──────────────────────────────────
+  mailchimp:
+    description: "Mailchimp — email campaigns, automations, subscriber management"
+    provider: stub
+    enabled: true
+    credentials_env: "MAILCHIMP_API_KEY"
+    skills: [email-sequence, onboarding-cro, cold-email]
+    rate_limit:
+      max_per_minute: 30
+    actions:
+      - name: create-campaign
+        description: "Create an email campaign draft"
+        parameters:
+          type: object
+          properties:
+            list-id: { type: string, description: "Audience/list ID" }
+            subject: { type: string, description: "Email subject line" }
+            from-name: { type: string, description: "Sender name" }
+            html-content: { type: string, description: "HTML email body" }
+          required: [list-id, subject, html-content]
+      - name: get-campaign-report
+        description: "Get performance metrics for a sent campaign"
+        parameters:
+          type: object
+          properties:
+            campaign-id: { type: string, description: "Mailchimp campaign ID" }
+          required: [campaign-id]
+      - name: list-audiences
+        description: "List all audiences/lists with subscriber counts"
+        parameters:
+          type: object
+      - name: search-members
+        description: "Search subscribers by email or tag"
+        parameters:
+          type: object
+          properties:
+            query: { type: string, description: "Search query (email or tag)" }
+            list-id: { type: string, description: "Filter by audience ID" }
+          required: [query]

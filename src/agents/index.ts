@@ -30,6 +30,42 @@ export {
   type ToolResultImageContent,
 } from "./tool-registry.ts";
 
+// ── Rate Limiter ─────────────────────────────────────────────────────
+export {
+  SlidingWindowRateLimiter,
+  RateLimitTimeoutError,
+  type RateLimiter,
+} from "./rate-limiter.ts";
+
+// ── MCP Server Manager ──────────────────────────────────────────────
+export {
+  MCPServerManager,
+  MCPServerError,
+  type MCPServerConfig,
+  type MCPServerHandle,
+  type MCPServerStatus,
+  type MCPCallToolResult,
+  type MCPToolResultContent,
+  type MCPToolDefinition,
+  type MCPClientAdapter,
+  type MCPClientFactory,
+  type ServerHealth,
+} from "./mcp-server-manager.ts";
+
+// ── MCP Tool Provider ───────────────────────────────────────────────
+export {
+  MCPToolProvider,
+  type MCPProviderConfig,
+} from "./mcp-provider.ts";
+
+// ── REST Tool Provider ──────────────────────────────────────────────
+export {
+  RESTToolProvider,
+  type ToolHandler,
+  type ToolHandlerResult,
+  type RESTEndpointConfig,
+} from "./rest-provider.ts";
+
 // ── Claude Client ───────────────────────────────────────────────────────
 export type {
   ClaudeClient,

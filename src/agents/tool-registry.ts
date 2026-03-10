@@ -16,7 +16,7 @@ export interface ToolActionData {
 
 export interface ToolConfigData {
   readonly description: string;
-  readonly provider: "stub" | "mcp" | "rest";
+  readonly provider: "stub" | "mcp" | "rest" | "playwright";
   readonly enabled?: boolean;
   readonly credentials_env?: string;
   readonly skills: readonly string[];
@@ -24,6 +24,12 @@ export interface ToolConfigData {
     readonly max_per_minute: number;
   };
   readonly mcp_server?: string;
+  readonly mcp_server_config?: {
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly transport?: "stdio" | "http";
+    readonly http_url?: string;
+  };
   readonly actions: readonly ToolActionData[];
 }
 
@@ -118,7 +124,7 @@ export class StubToolProvider implements ToolProvider {
 
 // ── Valid Providers ─────────────────────────────────────────────────────────
 
-const VALID_PROVIDERS = ["stub", "mcp", "rest"] as const;
+const VALID_PROVIDERS = ["stub", "mcp", "rest", "playwright"] as const;
 
 // Slug format: lowercase alphanumeric with hyphens, no leading/trailing hyphens.
 // Prevents qualified name separator ("__") collisions and ensures valid YAML keys.
@@ -148,6 +154,8 @@ export class ToolRegistry {
     readonly ClaudeToolDef[]
   >;
   private readonly toolSkillMap: ReadonlyMap<string, readonly string[]>;
+  /** Provider routing map — set via setProvider() during bootstrap. */
+  private readonly providerMap = new Map<string, ToolProvider>();
 
   private constructor(data: ToolRegistryData) {
     const toolNames: string[] = [];
@@ -308,16 +316,32 @@ export class ToolRegistry {
     return registry;
   }
 
+  // ── Provider Routing ────────────────────────────────────────────────────
+
+  /**
+   * Register a provider for a given provider type (e.g., "mcp", "rest", "playwright").
+   * Called during bootstrap to wire real providers.
+   */
+  setProvider(providerType: string, provider: ToolProvider): void {
+    this.providerMap.set(providerType, provider);
+  }
+
+  /**
+   * Get the registered provider for a type (for testing/introspection).
+   */
+  getProvider(providerType: string): ToolProvider | undefined {
+    return this.providerMap.get(providerType);
+  }
+
   // ── Tool Invocation ─────────────────────────────────────────────────────
 
   /**
    * Invoke a tool by its qualified name ("{toolName}__{actionName}").
    *
    * Parses the qualified name, validates the tool and action exist,
-   * then delegates to the appropriate ToolProvider.
+   * then delegates to the appropriate ToolProvider based on config.provider.
    *
-   * Phase 3b: All tools use StubToolProvider.
-   * Phase 4: Routes to MCPToolProvider or RESTToolProvider based on config.provider.
+   * Provider routing: explicit provider arg > providerMap[config.provider] > StubToolProvider.
    */
   async invokeTool(
     qualifiedName: string,
@@ -357,8 +381,12 @@ export class ToolRegistry {
       );
     }
 
-    // Delegate to provider (default: stub)
-    return (provider ?? DEFAULT_PROVIDER).invoke(toolName, actionName, params);
+    // Delegate to provider: explicit arg > providerMap routing > stub fallback
+    const effectiveProvider =
+      provider
+      ?? this.providerMap.get(config.provider)
+      ?? DEFAULT_PROVIDER;
+    return effectiveProvider.invoke(toolName, actionName, params);
   }
 
   // ── Validation ──────────────────────────────────────────────────────────

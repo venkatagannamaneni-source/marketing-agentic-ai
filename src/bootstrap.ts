@@ -18,6 +18,11 @@ import { PipelineFactory } from "./director/pipeline-factory.ts";
 import { PIPELINE_TEMPLATES } from "./agents/registry.ts";
 import { SkillRegistry } from "./agents/skill-registry.ts";
 import { ToolRegistry, ToolRegistryError } from "./agents/tool-registry.ts";
+import { SlidingWindowRateLimiter } from "./agents/rate-limiter.ts";
+import { MCPServerManager } from "./agents/mcp-server-manager.ts";
+import type { MCPServerConfig, MCPClientAdapter } from "./agents/mcp-server-manager.ts";
+import { MCPToolProvider } from "./agents/mcp-provider.ts";
+import { RESTToolProvider } from "./agents/rest-provider.ts";
 import { RoutingRegistry, RoutingRegistryError } from "./director/routing-registry.ts";
 import { ScheduleRegistry, ScheduleRegistryError } from "./scheduler/schedule-registry.ts";
 import { EventRegistry, EventRegistryError } from "./events/event-registry.ts";
@@ -138,6 +143,105 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
       throw err;
     }
   }
+
+  // 2b2. Provider Wiring — configure rate limiter, MCP server manager, and tool providers
+  const rateLimiter = new SlidingWindowRateLimiter({
+    maxWaitMs: config.mcp.invocationTimeoutMs,
+  });
+
+  // Configure rate limits from tool registry
+  for (const toolName of toolRegistry.toolNames) {
+    const toolConfig = toolRegistry.getToolConfig(toolName);
+    if (toolConfig?.rate_limit?.max_per_minute) {
+      rateLimiter.configure(toolName, toolConfig.rate_limit.max_per_minute);
+    }
+  }
+
+  // MCP Server Manager — stub client factory (real factory requires @modelcontextprotocol/sdk)
+  // When the MCP SDK is installed, replace this with real StdioClientTransport usage.
+  const stubClientFactory = (_config: MCPServerConfig): MCPClientAdapter => ({
+    async connect() { /* no-op until real MCP SDK installed */ },
+    async listTools() { return []; },
+    async callTool(_name: string, _args?: Record<string, unknown>) {
+      return { content: [{ type: "text" as const, text: "MCP SDK not installed. Install @modelcontextprotocol/sdk for real MCP support." }], isError: true };
+    },
+    async close() { /* no-op */ },
+  });
+
+  const mcpServerManager = new MCPServerManager({
+    logger: logger.child({ module: "mcp-server-manager" }),
+    clientFactory: stubClientFactory,
+    maxReconnectAttempts: config.mcp.maxReconnectAttempts,
+  });
+
+  // Build MCP server configs from tools.yaml
+  const mcpServerConfigs = new Map<string, MCPServerConfig>();
+  const mcpToolConfigs = new Map<string, typeof toolRegistry extends { getToolConfig(n: string): infer R } ? NonNullable<R> : never>();
+
+  for (const toolName of toolRegistry.toolNames) {
+    const tc = toolRegistry.getToolConfig(toolName);
+    if (!tc || tc.provider !== "mcp") continue;
+
+    mcpToolConfigs.set(toolName, tc);
+
+    if (tc.mcp_server && !mcpServerConfigs.has(tc.mcp_server)) {
+      // Parse credentials_env to inject env vars
+      const serverEnv: Record<string, string> = {};
+      if (tc.credentials_env) {
+        for (const envName of tc.credentials_env.split(",").map((s) => s.trim())) {
+          const val = process.env[envName];
+          if (val) {
+            serverEnv[envName] = val;
+          } else {
+            logger.warn(`Missing credential env var "${envName}" for MCP tool "${toolName}"`, {
+              tool: toolName,
+              envVar: envName,
+            });
+          }
+        }
+      }
+
+      // Derive server config
+      let command = "npx";
+      let args: string[] = ["-y", tc.mcp_server];
+
+      if (tc.mcp_server_config) {
+        command = tc.mcp_server_config.command;
+        args = [...tc.mcp_server_config.args];
+      }
+
+      mcpServerConfigs.set(tc.mcp_server, {
+        packageName: tc.mcp_server,
+        command,
+        args,
+        env: serverEnv,
+        timeoutMs: config.mcp.serverTimeoutMs,
+      });
+    }
+  }
+
+  // Create and wire providers
+  const mcpProvider = new MCPToolProvider({
+    serverManager: mcpServerManager,
+    rateLimiter,
+    serverConfigs: mcpServerConfigs,
+    toolConfigs: mcpToolConfigs,
+    logger: logger.child({ module: "mcp-provider" }),
+    config: { invocationTimeoutMs: config.mcp.invocationTimeoutMs },
+  });
+
+  const restProvider = new RESTToolProvider({
+    rateLimiter,
+    logger: logger.child({ module: "rest-provider" }),
+  });
+
+  toolRegistry.setProvider("mcp", mcpProvider);
+  toolRegistry.setProvider("rest", restProvider);
+
+  logger.info("Tool providers wired", {
+    mcpTools: mcpToolConfigs.size,
+    mcpServers: mcpServerConfigs.size,
+  });
 
   // 2c. Routing Registry — load from .agents/routing.yaml (optional)
   const routingPath = resolve(config.projectRoot, ".agents/routing.yaml");
@@ -430,7 +534,17 @@ export async function bootstrap(config: RuntimeConfig): Promise<Application> {
         });
       }
 
-      // 2. Stop queue manager (stops health checks, closes worker and queue)
+      // 2. Stop MCP servers
+      try {
+        await mcpServerManager.stopAll();
+        logger.info("MCP servers stopped");
+      } catch (err: unknown) {
+        logger.error("Error stopping MCP servers", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      // 3. Stop queue manager (stops health checks, closes worker and queue)
       try {
         await queueManager.stop();
         logger.info("Queue manager stopped");

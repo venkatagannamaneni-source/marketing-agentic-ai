@@ -691,9 +691,9 @@ describe("ToolRegistry.fromYaml", () => {
     "../../../.agents/tools.yaml",
   );
 
-  it("loads .agents/tools.yaml successfully (empty default)", async () => {
+  it("loads .agents/tools.yaml successfully", async () => {
     const registry = await ToolRegistry.fromYaml(yamlPath);
-    expect(registry.toolNames).toHaveLength(0);
+    expect(registry.toolNames.length).toBeGreaterThanOrEqual(1);
   });
 
   it("throws ToolRegistryError for missing file", async () => {

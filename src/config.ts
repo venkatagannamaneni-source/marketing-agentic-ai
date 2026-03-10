@@ -24,6 +24,11 @@ export interface RuntimeConfig {
   };
   readonly maxParallelAgents: number;
   readonly maxToolIterations: number;
+  readonly mcp: {
+    readonly serverTimeoutMs: number;
+    readonly invocationTimeoutMs: number;
+    readonly maxReconnectAttempts: number;
+  };
 }
 
 // ── Config Error ───────────────────────────────────────────────────────────
@@ -153,6 +158,43 @@ export function loadConfig(
     }
   }
 
+  // ── MCP Settings ──────────────────────────────────────────────────────
+  const mcpServerTimeoutRaw = env("MCP_SERVER_TIMEOUT_MS");
+  let mcpServerTimeoutMs = 30_000;
+  if (mcpServerTimeoutRaw !== undefined && mcpServerTimeoutRaw !== "") {
+    mcpServerTimeoutMs = parseInt(mcpServerTimeoutRaw, 10);
+    if (!Number.isFinite(mcpServerTimeoutMs) || mcpServerTimeoutMs < 1000) {
+      throw new ConfigError(
+        `MCP_SERVER_TIMEOUT_MS must be >= 1000, got "${mcpServerTimeoutRaw}".`,
+        "MCP_SERVER_TIMEOUT_MS",
+      );
+    }
+  }
+
+  const mcpInvocationTimeoutRaw = env("MCP_INVOCATION_TIMEOUT_MS");
+  let mcpInvocationTimeoutMs = 60_000;
+  if (mcpInvocationTimeoutRaw !== undefined && mcpInvocationTimeoutRaw !== "") {
+    mcpInvocationTimeoutMs = parseInt(mcpInvocationTimeoutRaw, 10);
+    if (!Number.isFinite(mcpInvocationTimeoutMs) || mcpInvocationTimeoutMs < 1000) {
+      throw new ConfigError(
+        `MCP_INVOCATION_TIMEOUT_MS must be >= 1000, got "${mcpInvocationTimeoutRaw}".`,
+        "MCP_INVOCATION_TIMEOUT_MS",
+      );
+    }
+  }
+
+  const mcpMaxReconnectRaw = env("MCP_MAX_RECONNECT_ATTEMPTS");
+  let mcpMaxReconnectAttempts = 3;
+  if (mcpMaxReconnectRaw !== undefined && mcpMaxReconnectRaw !== "") {
+    mcpMaxReconnectAttempts = parseInt(mcpMaxReconnectRaw, 10);
+    if (!Number.isFinite(mcpMaxReconnectAttempts) || mcpMaxReconnectAttempts < 0) {
+      throw new ConfigError(
+        `MCP_MAX_RECONNECT_ATTEMPTS must be >= 0, got "${mcpMaxReconnectRaw}".`,
+        "MCP_MAX_RECONNECT_ATTEMPTS",
+      );
+    }
+  }
+
   // ── Build and freeze ──────────────────────────────────────────────────
   const config: RuntimeConfig = {
     anthropicApiKey,
@@ -174,6 +216,11 @@ export function loadConfig(
     },
     maxParallelAgents,
     maxToolIterations,
+    mcp: {
+      serverTimeoutMs: mcpServerTimeoutMs,
+      invocationTimeoutMs: mcpInvocationTimeoutMs,
+      maxReconnectAttempts: mcpMaxReconnectAttempts,
+    },
   };
 
   return Object.freeze({
@@ -182,5 +229,6 @@ export function loadConfig(
     workspace: Object.freeze(config.workspace),
     budget: Object.freeze(config.budget),
     logging: Object.freeze(config.logging),
+    mcp: Object.freeze(config.mcp),
   });
 }

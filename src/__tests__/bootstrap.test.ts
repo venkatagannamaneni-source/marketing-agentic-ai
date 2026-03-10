@@ -14,6 +14,7 @@ function makeTestConfig(overrides?: Partial<RuntimeConfig>): RuntimeConfig {
     logging: { level: "silent" as const, format: "json" as const },
     maxParallelAgents: 2,
     maxToolIterations: 10,
+    mcp: { serverTimeoutMs: 30_000, invocationTimeoutMs: 60_000, maxReconnectAttempts: 3 },
     ...overrides,
   });
 }
